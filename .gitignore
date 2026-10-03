@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+*.log
+ml/models/*.joblib
+ml/models/*.json
+ml/data/*.csv
+__pycache__/
+*.pyc
+.DS_Store

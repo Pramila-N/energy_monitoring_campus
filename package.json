@@ -1,0 +1,17 @@
+{
+  "name": "smart-energy-system",
+  "version": "1.0.0",
+  "description": "AI-Based Smart Energy Monitoring and Optimization System for Campus Buildings",
+  "private": true,
+  "scripts": {
+    "setup": "npm --prefix backend install && npm --prefix frontend install && npm --prefix backend run seed",
+    "seed": "npm --prefix backend run seed",
+    "train": "python ml/scripts/train_model.py && python ml/scripts/train_occupancy_model.py",
+    "backend": "npm --prefix backend run dev",
+    "frontend": "npm --prefix frontend run dev",
+    "dev": "concurrently -n backend,frontend -c blue,green \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
