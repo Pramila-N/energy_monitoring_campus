@@ -55,7 +55,7 @@ async function seedFaculty() {
     updateOne: {
       filter: { employeeId: f.employeeId },
       update: {
-        $setOnInsert: {
+        $set: {
           name: f.name,
           department: f.department,
           phoneNumber: f.phoneNumber,

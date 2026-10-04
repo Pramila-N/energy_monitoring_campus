@@ -9,7 +9,8 @@
     "start": "node server.js",
     "dev": "node server.js",
     "seed": "node scripts/seed.js",
-    "seed:reset": "node scripts/seed.js --reset"
+    "seed:reset": "node scripts/seed.js --reset",
+    "test": "node --test"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

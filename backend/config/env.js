@@ -17,7 +17,15 @@ export const env = {
   mlPredictScript: process.env.ML_PREDICT_SCRIPT || 'scripts/predict.py',
   mlPredictOccupancyScript: process.env.ML_PREDICT_OCCUPANCY_SCRIPT || 'scripts/predict_occupancy.py',
   simIntervalMs: Number(process.env.SIM_INTERVAL_MS || 8000),
-  simMinutesPerTick: Number(process.env.SIM_MINUTES_PER_TICK || 30)
+  simMinutesPerTick: Number(process.env.SIM_MINUTES_PER_TICK || 30),
+  voiceProvider: (process.env.VOICE_PROVIDER || 'demo').toLowerCase(),
+  exotelSid: process.env.EXOTEL_ACCOUNT_SID || '',
+  exotelApiToken: process.env.EXOTEL_API_TOKEN || '',
+  exotelFromNumber: process.env.EXOTEL_FROM_NUMBER || '',
+  exotelCallerId: process.env.EXOTEL_CALLER_ID || '',
+  exotelPublicBaseUrl: (process.env.EXOTEL_PUBLIC_BASE_URL || '').replace(/\/+$/, ''),
+  callWebhookUser: process.env.CALLS_WEBHOOK_USER || '',
+  callWebhookPass: process.env.CALLS_WEBHOOK_PASS || ''
 };
 
 export default env;

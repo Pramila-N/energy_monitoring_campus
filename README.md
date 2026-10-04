@@ -24,12 +24,15 @@ lights/fans (an internet of things). This system:
 5. If consumption deviates more than a configurable threshold (default: warning `> 10%`,
    abnormal `> 20%`), the room is marked `warning`/`abnormal`, an **alert** is created
    (severity escalates with the deviation), and **optimization recommendations** are generated.
-6. The dashboard lets an admin **contact the faculty** automatically (simulated call/email)
-   and **resolve** the alert with a resolution note.
+6. The dashboard lets an admin **call the faculty directly on their mobile phone** (real
+   outbound call via **Exotel**, with full call status tracking, or a simulated lifecycle in
+   demo mode) and **resolve** the alert with a resolution note.
 
-Models were trained on generated-but-realistic campus data; measured offline accuracy is
-**R² ≈ 0.86 / MAE ≈ 0.09 kWh** for the energy model and **R² ≈ 0.48 / MAE ≈ 0.05** for the
-occupancy model (details in section 5).
+Models were trained on generated-but-realistic campus data using a **chronological train /
+held-out-final-week split**; measured accuracy on the held-out week is **R² ≈ 0.815 / MAE ≈
+0.097 kWh / MAPE ≈ 7.6 %** for the energy model and **R² ≈ 0.41 / MAE ≈ 0.05** for the
+occupancy model (details in section 5). All data is stored in **MongoDB Atlas** (database
+`smart_energy`).
 
 ### Live demo scenario
 
@@ -85,7 +88,8 @@ restart, so a full 30-room prediction pass completes in ~100 ms.
 | Frontend  | React 18, Vite 5, Tailwind CSS 3, React Router 6, Axios, Recharts, Lucide React, React Hook Form |
 | Backend   | Node 18+, Express, Mongoose (MongoDB), JSON Web Tokens, bcryptjs |
 | ML        | Python 3.10+, pandas, scikit-learn, joblib (scikit 1.7.x verified) |
-| Database  | MongoDB 8.x (any recent local/Atlas instance) |
+| Database  | MongoDB Atlas (`smart_energy`) or any MongoDB 8.x instance |
+| Telephony  | Exotel REST API + webhooks (real calls); built-in `demo` mode without credentials |
 | Orchestration | low `concurrently` dev script |
 
 ---
@@ -102,14 +106,15 @@ mini project 7/
 │   ├── config/             # env.js (dotenv), database.js (Mongo connect)
 │   ├── models/             # Admin, Building, Classroom, Faculty,
 │   │                       # EnergyReading, OccupancyReading, Prediction,
-│   │                       # Alert, Recommendation, Setting
+│   │                       # Alert, Recommendation, Setting, CallLog
 │   ├── mock-data/          # buildings, rooms, faculty, timetable,
 │   │                       # occupancy, energyProfile, scenarios + exportPredictionInput
 │   ├── services/           # simulation, prediction, ml, anomaly, alert,
-│   │                       # recommendation, energy, report, settings
-│   ├── controllers/        # thin request handlers
+│   │                       # recommendation, energy, report, settings, voice
+│   ├── controllers/        # thin request handlers (calls → callController)
 │   ├── routes/index.js     # all API routes (see §9)
-│   ├── middleware/         # JWT protect, error handler
+│   ├── middleware/         # JWT protect, rateLimit (calls), error handler
+│   ├── tests/              # `npm test` — Node built-in runner (calls, phone utils, IVR XML)
 │   └── scripts/seed.js     # creates system data + generates history, exports ML input
 ├── ml/
 │   ├── requirements.txt
@@ -156,14 +161,20 @@ exactly the "people count + schedule + time-of-day" recipe from the project brie
   and SVR, then persists the best estimator with a fitted pipeline as
   `ml/models/energy_model.joblib`.
 - `ml/scripts/train_occupancy_model.py` does the same for occupancy (Random Forest was best).
+- The energy dataset is split **chronologically**: the final 7 calendar days are held out as
+  the test week (713 samples across 30 rooms) and the models are tuned on what came before,
+  avoiding any time-travel leakage that a random split would allow.
 - `ml/scripts/evaluate_model.py` prints hold-out R², MAE, RMSE, MAPE and stores
   `ml/models/metrics.json` + `occupancy_metrics.json` (served by the dashboard).
+- `ml/scripts/demo_test_week.py` prints an actual-vs-predicted table for the held-out week —
+  handy for a faculty demo of the AI.
 
-### Measured accuracy (hold-out)
+### Measured accuracy (held-out final week)
 | Model | R² | MAE | RMSE | MAPE |
 |-------|-----|------|------|------|
-| Energy | 0.8637 | 0.0893 kWh | 0.211 kWh | 6.03 % |
-| Occupancy | 0.48 | 0.05 | — | — |
+| Energy (Linear Regression) | 0.8151 | 0.0965 kWh | 0.24 kWh | 7.59 % |
+| Energy (training split) | 0.8478 | — | — | — |
+| Occupancy (Random Forest) | 0.4097 | 0.0529 | — | — |
 
 ### Anomaly detection (runtime)
 Each cycle the prediction service forecasts expected kWh for every room; the meter value is
@@ -214,12 +225,80 @@ fly** by the backend so the dashboard is always live:
 
 ---
 
-## 7. Setup & Running
+## 7. Real Faculty Calling (Exotel)
+
+The dashboard can place a **real telephone call to the classroom's assigned faculty** on their
+mobile phone (their number is stored on the faculty record). This is managed entirely by the
+backend through **Exotel** — no faculty app, login or browser page is involved. Every call is
+recorded in the `CallLog` collection and its status is driven by **Exotel webhook callbacks**
+(so "answered", duration, etc. are only ever shown when the telephony provider confirms them).
+
+### Modes
+
+- **`VOICE_PROVIDER=demo`** (default): no real calls. A realistic lifecycle is simulated
+  (ringing → answered 65% of the time, then completed with a duration / else no-answer) and
+  still recorded in `CallLog`. Safe for development and demos — the UI behaves identically.
+- **`VOICE_PROVIDER=exotel`**: places a real call. Requires the Exotel credentials below;
+  the backend returns an error if they are missing/misconfigured.
+
+### Setup (production / real calls)
+
+1. Create an Exotel account → add money → **buy a virtual number** (the number the faculty
+   sees as the caller) and complete mobile-caller KYC as India TRAI requires.
+2. Exotel Console → Settings → **API Keys**: copy the *API Key* (Account SID) and the *API
+   Token* (secret).
+3. Configure `backend/.env`:
+   ```
+   VOICE_PROVIDER=exotel
+   EXOTEL_ACCOUNT_SID=<api-key>
+   EXOTEL_API_TOKEN=<api-token>
+   EXOTEL_FROM_NUMBER=<your-exotel-virtual-number, E.164 e.g. +918000111000>
+   EXOTEL_CALLER_ID=<optional extra verified caller-id>
+   EXOTEL_PUBLIC_BASE_URL=<public HTTPS base, e.g. https://abc123.ngrok-free.app>
+   ```
+   Optionally protect the Exotel webhook with HTTP Basic Auth by setting
+   `CALLS_WEBHOOK_USER` and `CALLS_WEBHOOK_PASS` (set both or leave both empty).
+4. **`EXOTEL_PUBLIC_BASE_URL` must be reachable over public HTTPS** because Exotel fetches
+   your IVR answer-script from `GET <base>/api/calls/<callId>/ivr` and posts status callbacks
+   to `POST <base>/api/calls/webhook`. During local development use a tunnel:
+   ```
+   ngrok http 5000
+   ```
+   then put the generated `https://…ngrok-free.app` value in `EXOTEL_PUBLIC_BASE_URL` and
+   restart. Exotel's callbacks carry the original `CallSid`; the webhook matches a pending
+   `CallLog` by its `providerCallId`, so it is safe for two rooms to be called concurrently.
+5. The IVR answer-script is a small XML prompt ("Calling <faculty name>…") and then hangs
+   up — the connection itself is the notification.
+
+### Behaviour & safeguards
+
+- **Confirmation dialog** before a call is placed; the button is disabled while a call is
+  initiating/live.
+- **Rate limit**: at most **5 calls/minute per admin** (`POST /api/calls/faculty`, 429 past it).
+- **No duplicate live calls**: if the same room *or* faculty already has an active call in the
+  last 10 minutes, the new request is rejected (409).
+- **Privacy**: the frontend only ever sends `classroomId`; phone numbers are **masked**
+  (`+91 98••• 1•••1`) in all API responses, and `.env` secrets stay on the server.
+- **Statuses**: `initiated → ringing → answered → in-progress → completed/busy/no-answer/failed`.
+  Terminal statuses come from the Exotel callback; `failureReason` is stored when a call fails.
+- **Webhook auth**: when `CALLS_WEBHOOK_USER/PASS` are set, the Exotel webhook requires HTTP
+  Basic Auth and the endpoint verifies it.
+- **Tests**: `cd backend; npm test` covers phone-number normalization, Exotel status mapping,
+  IVR XML escaping, the rate limiter and the duplicate-call guard.
+
+Note: the older simulated `POST /api/alerts/:id/contact` endpoint and the classroom "simulate
+contact" modal still exist for convenience, but the recommended path is the **Call Faculty**
+buttons on the Alerts, Campus and Building pages.
+
+---
+
+## 8. Setup & Running
 
 ### Prerequisites
 - Node.js 18+ (tested on Node 24)
 - Python 3.10+ with `pip` (tested on 3.13)
-- MongoDB running locally (`mongodb://localhost:27017`) or a connection string
+- MongoDB — either a **MongoDB Atlas** cluster (recommended; database name `smart_energy`)
+  or MongoDB running locally (`mongodb://localhost:27017`)
 - (Windows) PowerShell or your shell of choice
 
 ### 1) Install dependencies
@@ -238,6 +317,20 @@ python -m pip install -r ml/requirements.txt
 cp .env.example backend/.env      # Windows: copy .env.example backend\.env
 cp .env.example frontend/.env     # frontend already ships with VITE_API_URL
 ```
+
+**Using MongoDB Atlas (recommended):** create a database user in Atlas (Database Access),
+then set the connection string in `backend/.env`:
+
+```
+MONGODB_URI=mongodb+srv://npramila2006:<your-password>@cluster0.kyrnyem.mongodb.net/smart_energy
+```
+
+Notes:
+- The database name is `smart_energy` (the trailing path segment).
+- If the password contains special characters (`@ : ? # / %`), URL-encode them (e.g. `@` → `%40`).
+- Atlas + your machine need to be reachable to each other (IP Access List) — during
+  development enable "Allow access from anywhere" (`0.0.0.0/0`).
+- A `npm --prefix backend run seed` (or `seed:reset`) pushes all demo data to the configured DB.
 
 ### 3) Train the ML models
 ```bash
@@ -270,7 +363,7 @@ Password: Admin@123
 
 ---
 
-## 8. API Overview
+## 9. API Overview
 
 | Method | Route | Description |
 |--------|-------|-------------|
@@ -286,7 +379,6 @@ Password: Admin@123
 | POST | `/api/predictions/generate` | Re-run the forecast pass |
 | GET | `/api/ml/status` | Model readiness |
 | GET | `/api/alerts` | Alert feed (filter: status/severity/type/roomId) |
-| POST | `/api/alerts/:id/contact` | Simulated faculty notification |
 | POST | `/api/alerts/:id/resolve` | Resolve with note |
 | GET | `/api/recommendations` | Optimization suggestions |
 | POST | `/api/recommendations/generate` | Re-evaluate suggestions |
@@ -295,22 +387,31 @@ Password: Admin@123
 | GET | `/api/reports` · `/api/reports/export.csv` | Aggregates (day/week/month) + CSV |
 | GET | `/api/settings` · PUT `/api/settings` | Threshold configuration |
 | GET | `/api/simulation/status` · POST `/start` `/stop` | Simulation control |
+| POST | `/api/calls/faculty` | Initiate call to a classroom's faculty (rate-limited 5/min) |
+| GET | `/api/calls/status/:classroomId` | Live call status for a room (active + last call, masked) |
+| GET | `/api/calls/history` | Recent call logs (phone numbers masked) |
+| POST | `/api/calls/webhook` | Exotel status callback (public; optional Basic Auth) |
+| GET | `/api/calls/:callId/ivr` | IVR answer-script XML (public, fetched by Exotel) |
 
 ---
 
-## 9. Security Notes
+## 10. Security Notes
 
-- Passwords hashed with bcrypt; all routes (except `/auth/login` and `/health`) require a JWT
-  from the `Authorization: Bearer <token>` header.
-- `.env` files and trained model artifacts are gitignored — never commit secrets.
+- Passwords hashed with bcrypt; all routes (except `/auth/login`, `/health` and the public
+  `/calls/webhook` + `/calls/:callId/ivr`) require a JWT from the
+  `Authorization: Bearer <token>` header.
+- `.env` files and trained model artifacts are gitignored — never commit secrets. Exotel API
+  tokens live only in `backend/.env`.
+- Call endpoints are rate-limited (5 calls/min/admin) and dedupe active calls; phone numbers
+  are masked before leaving the backend.
 - For production, replace `JWT_SECRET`, tighten CORS, add rate limiting and HTTPS.
 
 ---
 
-## 10. Roadmap / Future Integration
+## 11. Roadmap / Future Integration
 
 - Real IoT ingestion (ESP32 + MQTT → `POST /api/energy/readings`).
 - Real attendance feed replacing `prediction_input.csv`.
-- Live faculty contact (twilio / email) instead of the simulated notification.
 - Time-series forecasting (Prophet/LSTM) for hourly campus load plus peak-shaving advice.
 - Per-room fixed-energy budgets with daily quotas.
+- SMS fallback (Exotel SMS) when the faculty is unreachable by voice.

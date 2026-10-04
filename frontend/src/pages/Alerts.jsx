@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
-import { Bell, Phone, CheckCircle2, Filter, AlertTriangle, Lightbulb } from 'lucide-react';
+import { Bell, CheckCircle2, Filter, AlertTriangle, Lightbulb } from 'lucide-react';
 import { usePolling } from '../hooks/useApi.js';
 import api from '../api/client.js';
 import { PageHeader } from '../components/PageHeader.jsx';
 import { PageLoader, ErrorState, EmptyState } from '../components/Feedback.jsx';
 import { SeverityBadge, AlertTypeTag, StatusBadge, RecTypeTag } from '../components/Badges.jsx';
 import { Modal } from '../components/Modal.jsx';
+import CallFaculty from '../components/CallFaculty.jsx';
 import { useToast } from '../context/ToastContext.jsx';
 import { formatKwh, formatPct, formatNumber, formatTimeStamp } from '../utils/format.js';
 
@@ -27,7 +28,6 @@ export default function Alerts() {
   const [severity, setSeverity] = useState('');
   const [resolveTarget, setResolveTarget] = useState(null);
   const [note, setNote] = useState('');
-  const [busyId, setBusyId] = useState(null);
   const [busyRecId, setBusyRecId] = useState(null);
 
   const { data, loading, error, refetch } = usePolling(() => api.get('/alerts').then((r) => r.data), 60000);
@@ -66,19 +66,6 @@ export default function Alerts() {
     active: all.filter((a) => a.status === 'active').length,
     contacted: all.filter((a) => a.status === 'contacted').length,
     resolved: all.filter((a) => a.status === 'resolved').length
-  };
-
-  const contact = async (a) => {
-    setBusyId(a._id);
-    try {
-      await api.post(`/alerts/${a._id}/contact`);
-      toast.success(`Faculty notified about ${a.roomId?.roomNumber || 'room'} (simulated).`);
-      refetch();
-    } catch (e) {
-      toast.error(e?.response?.data?.message || 'Failed to contact');
-    } finally {
-      setBusyId(null);
-    }
   };
 
   const resolve = async () => {
@@ -165,10 +152,12 @@ export default function Alerts() {
                     {a.resolutionNote && <p className="text-xs text-slate-400">Resolution: {a.resolutionNote}</p>}
                   </div>
                   {!resolved && (
-                    <div className="flex shrink-0 gap-2">
-                      <button className="btn-secondary py-1.5 text-xs" disabled={busyId === a._id} onClick={() => contact(a)}>
-                        <Phone size={12} /> {a.status === 'contacted' ? 'Re-contact' : 'Contact faculty'}
-                      </button>
+                    <div className="flex shrink-0 flex-col items-end gap-2">
+                      <CallFaculty
+                        classroomId={a.roomId?._id || a.roomId}
+                        roomNumber={a.roomId?.roomNumber}
+                        facultyName={a.facultyName}
+                      />
                       <button className="btn-success py-1.5 text-xs" onClick={() => setResolveTarget(a)}>
                         <CheckCircle2 size={12} /> Resolve
                       </button>

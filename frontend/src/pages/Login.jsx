@@ -19,7 +19,12 @@ export default function Login() {
       toast.success('Welcome back!');
       navigate('/dashboard');
     } catch (e) {
-      toast.error(e?.response?.data?.message || 'Invalid credentials');
+      const status = e?.response?.status;
+      if (status === 401 || status === 400) {
+        toast.error(e?.response?.data?.message || 'Invalid email or password.');
+      } else {
+        toast.error('Cannot reach the server. Is the backend running?');
+      }
     }
   };
 

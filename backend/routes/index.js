@@ -13,6 +13,8 @@ import applianceController from '../controllers/applianceController.js';
 import simulationController from '../controllers/simulationController.js';
 import reportController from '../controllers/reportController.js';
 import settingsController from '../controllers/settingsController.js';
+import callController from '../controllers/callController.js';
+import rateLimitCalls from '../middleware/rateLimit.js';
 
 const router = Router();
 
@@ -76,6 +78,13 @@ router.get('/reports/export.csv', protect, reportController.exportCSV);
 // Settings
 router.get('/settings', protect, settingsController.getConfig);
 router.put('/settings', protect, settingsController.putConfig);
+
+// Faculty calls (real telephony — Exotel) 
+router.post('/calls/faculty', protect, rateLimitCalls({ max: 5 }), callController.createCall);
+router.get('/calls/status/:classroomId', protect, callController.getStatusForRoom);
+router.get('/calls/history', protect, callController.getHistory);
+router.get('/calls/:callId/ivr', callController.serveIVR); // public — fetched by Exotel on answer
+router.post('/calls/webhook', callController.handleWebhook); // public — Exotel status callbacks
 
 // Health
 router.get('/health', (req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }));

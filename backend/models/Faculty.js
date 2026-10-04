@@ -7,7 +7,8 @@ const facultySchema = new mongoose.Schema(
     department: { type: String, default: 'General' },
     phoneNumber: { type: String, default: '' },
     email: { type: String, default: '' },
-    assignedRooms: [{ type: String }]
+    assignedRooms: [{ type: String }],
+    active: { type: Boolean, default: true }
   },
   { timestamps: true }
 );

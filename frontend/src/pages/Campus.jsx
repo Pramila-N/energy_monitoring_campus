@@ -1,21 +1,19 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Building2, Zap, Users, AlertTriangle, ArrowRight, Search, DoorOpen, Filter, Phone } from 'lucide-react';
+import { Building2, Zap, Users, AlertTriangle, ArrowRight, Search, DoorOpen, Filter } from 'lucide-react';
 import { usePolling } from '../hooks/useApi.js';
 import api from '../api/client.js';
-import { useToast } from '../context/ToastContext.jsx';
 import { PageHeader } from '../components/PageHeader.jsx';
 import { PageLoader, ErrorState, EmptyState } from '../components/Feedback.jsx';
 import { StatusBadge, OnOffBadge, RoomTypeTag } from '../components/Badges.jsx';
+import CallFaculty from '../components/CallFaculty.jsx';
 import { formatKwh, formatNumber } from '../utils/format.js';
 
 export default function Campus() {
-  const toast = useToast();
   const buildingsApi = usePolling(() => api.get('/buildings').then((r) => r.data), 60000);
   const roomsApi = usePolling(() => api.get('/classrooms').then((r) => r.data), 60000);
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
-  const [calling, setCalling] = useState(null);
 
   const buildings = buildingsApi.data?.buildings || [];
   const allRooms = roomsApi.data?.classrooms || [];
@@ -26,23 +24,6 @@ export default function Campus() {
     if (status) list = list.filter((r) => r.status === status);
     return list;
   }, [allRooms, q, status]);
-
-  const callFaculty = async (r) => {
-    const facId = r.facultyId?._id || r.facultyId;
-    if (!facId) {
-      toast.error(`${r.roomNumber} has no faculty assigned.`);
-      return;
-    }
-    setCalling(r._id);
-    try {
-      const { data } = await api.post(`/faculty/${facId}/contact`);
-      toast.success(data.message);
-    } catch (e) {
-      toast.error(e?.response?.data?.message || 'Failed to contact faculty');
-    } finally {
-      setCalling(null);
-    }
-  };
 
   if (buildingsApi.loading && !buildingsApi.data) return <PageLoader label="Loading campus overview…" />;
   if (buildingsApi.error) return <ErrorState message={buildingsApi.error} onRetry={buildingsApi.refetch} />;
@@ -187,14 +168,13 @@ export default function Campus() {
                     <td className="td text-right">{formatNumber(r.totalEnergy, 0)}</td>
                     <td className="td"><StatusBadge status={r.status} /></td>
                     <td className="td text-right">
-                      <button
-                        onClick={() => callFaculty(r)}
-                        disabled={!r.facultyId || calling === r._id}
-                        title={r.facultyId?.name || 'No faculty assigned'}
-                        className={`text-xs font-semibold ${r.facultyId ? 'text-brand-600 hover:underline' : 'cursor-not-allowed text-slate-300'}`}
-                      >
-                        {calling === r._id ? 'Calling…' : <><Phone size={11} className="mr-0.5 inline" /> Call</>}
-                      </button>
+                      <CallFaculty
+                        compact
+                        classroomId={r._id}
+                        roomNumber={r.roomNumber}
+                        facultyName={r.facultyId?.name}
+                        disabled={!r.facultyId}
+                      />
                     </td>
                   </tr>
                 ))}
