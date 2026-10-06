@@ -11,9 +11,10 @@ Outputs:
     ml/data/occupancy_training_data.csv    (occupancy model)
 
 Each row also carries an artificial calendar date + day_index so training can
-hold out the FINAL week chronologically (one week of unseen test data after
-~2 months of training data) — exactly the demo shown to faculty.
+hold out the FINAL month chronologically (one month of unseen "future" test
+data after ~3 months of training data) — exactly the demo shown to faculty.
 """
+import argparse
 import argparse
 import math
 import os
@@ -198,8 +199,13 @@ def generate_occupancy_data(rooms, week_index, seed, start_date):
 def main():
     parser = argparse.ArgumentParser(description="Generate synthetic energy + occupancy training data")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--days", type=int, default=91, help="calendar days of history per room (default 91 = ~2 months train + 1 week test)")
+    parser.add_argument("--days", type=int, default=119, help="calendar days of history per room (default 119 = ~3 months total)")
+    parser.add_argument("--test-days", type=int, default=28, help="calendar days held out as the future test month (default 28 = 4 weeks)")
     args = parser.parse_args()
+
+    if args.days <= args.test_days:
+        print("--days must be greater than --test-days")
+        sys.exit(1)
 
     rooms = parse_rooms_js()
     weeks = max(1, args.days // 7)
@@ -224,7 +230,7 @@ def main():
         for r in occ_rows:
             f.write(",".join(str(r[k]) for k in ["room_id", "building", "room_type", "day_of_week", "period", "expected_occupancy", "capacity", "faculty_id", "faculty_avg_attendance", "actual_attendance_rate", "actual_present", "date", "day_index"]) + "\n")
 
-    print(f"Generated {len(energy_rows)} energy rows ({weeks} weeks = ~{weeks - 1} weeks train + 1 week held-out test) -> {energy_file}")
+    print(f"Generated {len(energy_rows)} energy rows ({weeks} weeks total; last {args.test_days} calendar days are held out as the future test month) -> {energy_file}")
     print(f"Generated {len(occ_rows)} occupancy rows -> {occ_file}")
 
 

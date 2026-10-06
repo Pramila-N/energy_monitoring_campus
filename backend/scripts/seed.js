@@ -19,7 +19,7 @@ import { generateBulkHistory } from '../services/bulkHistoryService.js';
 import mlService from '../services/mlService.js';
 
 const SEED_HISTORY_DAYS = process.env.SEED_HISTORY_DAYS ? Number(process.env.SEED_HISTORY_DAYS) : 40;
-const SEED_PREDICTION_DAYS = process.env.SEED_PREDICTION_DAYS ? Number(process.env.SEED_PREDICTION_DAYS) : 3;
+const SEED_PREDICTION_DAYS = process.env.SEED_PREDICTION_DAYS ? Number(process.env.SEED_PREDICTION_DAYS) : 20;
 
 async function seedAdmin() {
   const existing = await Admin.findOne({ email: 'admin@smartcampus.local' });

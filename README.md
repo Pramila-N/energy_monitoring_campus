@@ -29,8 +29,9 @@ lights/fans (an internet of things). This system:
    demo mode) and **resolve** the alert with a resolution note.
 
 Models were trained on generated-but-realistic campus data using a **chronological train /
-held-out-final-week split**; measured accuracy on the held-out week is **R² ≈ 0.815 / MAE ≈
-0.097 kWh / MAPE ≈ 7.6 %** for the energy model and **R² ≈ 0.41 / MAE ≈ 0.05** for the
+held-out-final-month split** (the model is asked to forecast one full month of data it has
+never seen); measured accuracy on that held-out month is **R² ≈ 0.845 / MAE ≈
+0.094 kWh / MAPE ≈ 7.7 %** for the energy model and **R² ≈ 0.41 / MAE ≈ 0.05** for the
 occupancy model (details in section 5). All data is stored in **MongoDB Atlas** (database
 `smart_energy`).
 
@@ -155,25 +156,28 @@ start of the cycle), the timetable, time-of-day, and the room's own recent histo
 exactly the "people count + schedule + time-of-day" recipe from the project brief.
 
 ### Model training (offline)
-- Data: `ml/scripts/generate_data.py` produces a 4‑week history of
-  per-slot energy/occupancy snapshots (`ml/data/training_data.csv`).
-- `ml/scripts/train_model.py` evaluates Linear Regression, Random Forest, Gradient Boosting
-  and SVR, then persists the best estimator with a fitted pipeline as
-  `ml/models/energy_model.joblib`.
+- Data: `ml/scripts/generate_data.py` produces a ~3‑month history of
+  per-slot energy/occupancy snapshots (`ml/data/training_data.csv`); the final 28 calendar
+  days are reserved as the future test month.
+- `ml/scripts/train_model.py` evaluates Linear Regression, Decision Tree and Random Forest,
+  then persists the best estimator with a fitted pipeline as
+  `ml/models/energy_model.joblib`. Pass `--test-days <n>` to change the held-out window.
 - `ml/scripts/train_occupancy_model.py` does the same for occupancy (Random Forest was best).
-- The energy dataset is split **chronologically**: the final 7 calendar days are held out as
-  the test week (713 samples across 30 rooms) and the models are tuned on what came before,
-  avoiding any time-travel leakage that a random split would allow.
+- The energy dataset is split **chronologically**: the final 28 calendar days (≈ one month of
+  data the model never sees) are held out as the test month (2858 samples across 30 rooms),
+  and the models are tuned on what came before, avoiding any time-travel leakage that a
+  random split would allow.
 - `ml/scripts/evaluate_model.py` prints hold-out R², MAE, RMSE, MAPE and stores
   `ml/models/metrics.json` + `occupancy_metrics.json` (served by the dashboard).
-- `ml/scripts/demo_test_week.py` prints an actual-vs-predicted table for the held-out week —
+- `ml/scripts/demo_test_week.py` prints an actual-vs-predicted table for the held-out
+  month (it auto-labels MONTH vs WEEK from `metrics.json` if you lower `--test-days`) —
   handy for a faculty demo of the AI.
 
-### Measured accuracy (held-out final week)
+### Measured accuracy (held-out final month)
 | Model | R² | MAE | RMSE | MAPE |
 |-------|-----|------|------|------|
-| Energy (Linear Regression) | 0.8151 | 0.0965 kWh | 0.24 kWh | 7.59 % |
-| Energy (training split) | 0.8478 | — | — | — |
+| Energy (Linear Regression) | 0.8448 | 0.0939 kWh | 0.2178 kWh | 7.73 % |
+| Energy (training split) | 0.8453 | — | — | — |
 | Occupancy (Random Forest) | 0.4097 | 0.0529 | — | — |
 
 ### Anomaly detection (runtime)

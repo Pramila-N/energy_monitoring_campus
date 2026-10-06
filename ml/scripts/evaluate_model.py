@@ -1,10 +1,11 @@
 """
-Evaluate the saved energy model on the held-out FINAL WEEK (one week of
-unseen data after ~2 months of training data) and write actual-vs-predicted
-predictions to ml/models/test_predictions.csv for the faculty demo.
+Evaluate the saved energy model on the held-out FINAL MONTH (one month of
+unseen "future" data after ~3 months of training data) and write actual-vs-
+predicted predictions to ml/models/test_predictions.csv for the faculty demo.
 
-Run:  python ml/scripts/evaluate_model.py
+Run:  python ml/scripts/evaluate_model.py [--test-days 28]
 """
+import argparse
 import json
 import os
 import sys
@@ -18,7 +19,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 DATA_FILE = os.path.join(ROOT, "ml", "data", "training_data.csv")
 MODELS_DIR = os.path.join(ROOT, "ml", "models")
 
-TEST_DAYS = 7
+TEST_DAYS = 28
 
 
 def metrics_dict(y_true, y_pred):
@@ -32,13 +33,18 @@ def metrics_dict(y_true, y_pred):
     return {"mae": round(mae, 4), "rmse": round(rmse, 4), "r2": round(r2, 4), "mape": round(mape, 2)}
 
 
-def held_out_split(df):
+def held_out_split(df, test_days):
     maxd = df.groupby("room_id")["day_index"].transform("max")
-    mask = (maxd - df["day_index"]) < TEST_DAYS
+    mask = (maxd - df["day_index"]) < test_days
     return df[~mask], df[mask]
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Evaluate the saved energy model on the held-out future month")
+    parser.add_argument("--test-days", type=int, default=TEST_DAYS, help="calendar days held out as the future test month")
+    args = parser.parse_args()
+    test_days = args.test_days
+
     pipe_file = os.path.join(MODELS_DIR, "energy_pipeline.joblib")
     if not os.path.exists(pipe_file):
         print("Model not found. Run `python ml/scripts/train_model.py` first.")
@@ -50,19 +56,19 @@ def main():
 
     df = pd.read_csv(DATA_FILE).dropna(subset=features + [target])
     if "day_index" not in df.columns:
-        print("day_index column missing — regenerate data with generate_data.py (default 91 days).")
+        print("day_index column missing — regenerate data with generate_data.py (default 119 days).")
         sys.exit(1)
 
-    train_df, test_df = held_out_split(df)
+    train_df, test_df = held_out_split(df, test_days)
     X_test, y_test = test_df[features], test_df[target]
 
     pipe = joblib.load(pipe_file)
     y_pred = pipe.predict(X_test)
     m = metrics_dict(y_test, y_pred)
 
-    print("=== Saved Energy Model Evaluation (held-out final week) ===")
+    print("=== Saved Energy Model Evaluation (held-out future month) ===")
     print(f"Model: {meta.get('model_version', 'energy-v1')} ({meta.get('model', 'sklearn')})")
-    print(f"Test week rows: {len(test_df)}  (train rows: {len(train_df)})")
+    print(f"Test month rows: {len(test_df)}  (train rows: {len(train_df)})")
     print(f"R² Score: {m['r2']:.4f}")
     print(f"MAE: {m['mae']:.4f} kWh")
     print(f"RMSE: {m['rmse']:.4f} kWh")
@@ -79,8 +85,8 @@ def main():
         saved = json.load(f)
     saved["metrics"] = m
     saved["split"] = {
-        "strategy": "chronological held-out final week",
-        "test_days": TEST_DAYS,
+        "strategy": "chronological held-out final month (future data)",
+        "test_days": test_days,
         "train_rows": int(len(train_df)),
         "test_rows": int(len(test_df)),
     }

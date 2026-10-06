@@ -2,15 +2,15 @@
 Train the Energy Prediction Model.
 
 Pipeline:
-    1. Load ml/data/training_data.csv (~2 months of synthetic meter data)
+    1. Load ml/data/training_data.csv (~3 months of synthetic meter data)
     2. Validate + preprocess (categorical encoding via OneHot, no scaling for RF)
-    3. Chronological split: train on the first ~2 months, TEST on the FINAL
-       held-out week (no random shuffling — mirrors real forecasting).
+    3. Chronological split: train on the first ~3 months, TEST on the FINAL
+       held-out month (no random shuffling — mirrors real forecasting).
     4. Compare Linear Regression / Decision Tree / Random Forest
-    5. Select best model by R² on the held-out week
+    5. Select best model by R² on the held-out month
     6. Save model + preprocessing pipeline + features + metrics + test predictions
 
-Run from project root:  python ml/scripts/train_model.py
+Run from project root:  python ml/scripts/train_model.py [--test-days 28]
 """
 import argparse
 import json
@@ -40,7 +40,7 @@ CATEGORICAL = ["building", "room_type"]
 TARGET = "actual_energy"
 
 MODEL_VERSION = "energy-v1"
-TEST_DAYS = 7  # the final 7 calendar days of history become the held-out week
+TEST_DAYS = 28  # the final 28 calendar days of history become the held-out future month
 
 
 def metrics_dict(y_true, y_pred):
@@ -66,11 +66,11 @@ def build_pipeline(model):
     return Pipeline([("pre", pre), ("model", model)])
 
 
-def held_out_split(df):
-    """Rows of each room are chronological; the last TEST_DAYS calendar days
-    of every room form the held-out test set (the 'final week')."""
+def held_out_split(df, test_days):
+    """Rows of each room are chronological; the last `test_days` calendar days
+    of every room form the held-out test set (the 'future month')."""
     maxd = df.groupby("room_id")["day_index"].transform("max")
-    mask = (maxd - df["day_index"]) < TEST_DAYS
+    mask = (maxd - df["day_index"]) < test_days
     train = df[~mask]
     test = df[mask]
     return train, test
@@ -79,12 +79,14 @@ def held_out_split(df):
 def main():
     parser = argparse.ArgumentParser(description="Train and save the energy prediction model")
     parser.add_argument("--data", default=DATA_FILE)
+    parser.add_argument("--test-days", type=int, default=TEST_DAYS, help="calendar days held out as the future test month")
     parser.add_argument("--no-save", action="store_true", help="only evaluate, do not overwrite saved artefacts")
     args = parser.parse_args()
 
     if not os.path.exists(args.data):
         print("training_data.csv not found. Run `python ml/scripts/generate_data.py` first.")
         sys.exit(1)
+    test_days = args.test_days
 
     print("Training Energy Prediction Model...\n")
     df = pd.read_csv(args.data)
@@ -102,13 +104,13 @@ def main():
     df = df[df[TARGET] >= 0]
 
     if "day_index" not in df.columns:
-        print("day_index column missing — regenerate data with generate_data.py (default 91 days).")
+        print("day_index column missing — regenerate data with generate_data.py (default 119 days).")
         sys.exit(1)
 
-    train_df, test_df = held_out_split(df)
+    train_df, test_df = held_out_split(df, test_days)
     X_train, y_train = train_df[FEATURES], train_df[TARGET]
     X_test, y_test = test_df[FEATURES], test_df[TARGET]
-    print(f"Chronological split: train = last {len(train_df)} rows (~2 months) | test = final held-out week = {len(test_df)} rows\n")
+    print(f"Chronological split: train = {len(train_df)} rows (~3 months) | test = final held-out month ({test_days} days) = {len(test_df)} rows\n")
 
     best = None
     results = {}
@@ -129,7 +131,7 @@ def main():
         if best is None or r2 > best[1]["r2"]:
             best = (name, m, pipe)
 
-    print(f"\nBest Model: {best[0]} (evaluated on the held-out week)")
+    print(f"\nBest Model: {best[0]} (evaluated on the held-out month)")
 
     y_test_pred = best[2].predict(X_test)
     y_train_pred = best[2].predict(X_train)
@@ -144,7 +146,7 @@ def main():
     joblib.dump(best[2], os.path.join(MODELS_DIR, "energy_pipeline.joblib"))
     joblib.dump(best[2].named_steps["model"], os.path.join(MODELS_DIR, "energy_model.joblib"))
 
-    # Held-out week predictions file (actual vs predicted) for the faculty demo.
+    # Held-out month predictions file (actual vs predicted) for the faculty demo.
     test_out = test_df[["room_id", "date", "hour", "period", "day_of_week", "building", "room_type", "occupancy", "lights_on", "fans_on", "historical_energy"]].copy()
     test_out["actual_energy"] = y_test.values
     test_out["predicted_energy"] = np.round(y_test_pred, 3)
@@ -154,15 +156,15 @@ def main():
     meta = {
         "model": best[0],
         "model_version": MODEL_VERSION,
-        "metrics": best[1],                  # evaluated on the held-out test week
+        "metrics": best[1],                  # evaluated on the held-out test month
         "train_metrics": train_metrics,
         "comparison": results,
         "features": FEATURES,
         "categorical": CATEGORICAL,
         "target": TARGET,
         "split": {
-            "strategy": "chronological held-out final week",
-            "test_days": TEST_DAYS,
+            "strategy": "chronological held-out final month (future data)",
+            "test_days": test_days,
             "train_rows": int(len(train_df)),
             "test_rows": int(len(test_df)),
         },
@@ -175,7 +177,7 @@ def main():
     print("\nModel saved successfully.")
     print("  energy_model.joblib   (trained estimator)")
     print("  energy_pipeline.joblib (preprocessing + estimator)")
-    print("  metrics.json / features.json / test_predictions.csv (held-out week)")
+    print("  metrics.json / features.json / test_predictions.csv (held-out month)")
 
 
 if __name__ == "__main__":
