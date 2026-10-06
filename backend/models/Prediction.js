@@ -21,5 +21,6 @@ const predictionSchema = new mongoose.Schema(
 );
 
 predictionSchema.index({ roomId: 1, timestamp: -1 });
+predictionSchema.index({ status: 1, createdAt: -1 });
 
 export default mongoose.model('Prediction', predictionSchema);

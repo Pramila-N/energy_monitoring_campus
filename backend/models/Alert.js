@@ -27,5 +27,6 @@ const alertSchema = new mongoose.Schema(
 
 alertSchema.index({ status: 1, createdAt: -1 });
 alertSchema.index({ roomId: 1 });
+alertSchema.index({ resolvedAt: -1 });
 
 export default mongoose.model('Alert', alertSchema);

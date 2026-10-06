@@ -3,8 +3,6 @@ import Prediction from '../models/Prediction.js';
 import Alert from '../models/Alert.js';
 import Building from '../models/Building.js';
 import Classroom from '../models/Classroom.js';
-import energyService from './energyService.js';
-import AlertModel from '../models/Alert.js';
 
 function localTimezoneString() {
   const off = -new Date().getTimezoneOffset();
@@ -24,47 +22,57 @@ function startOfRange(type, from) {
   return d;
 }
 
-async function byPeriod(type, fromDate, toDate) {
-  const match = { timestamp: { $gte: fromDate } };
-  if (toDate) match.timestamp = { ...match.timestamp, $lte: toDate };
-
-  // Day report = hourly buckets; week/month = daily buckets.
-  const gid = type === 'day'
-    ? { $dateToString: { format: '%Y-%m-%d %H:00', date: '$timestamp', timezone: LOCAL_TZ } }
-    : { $dateToString: { format: '%Y-%m-%d', date: '$timestamp', timezone: LOCAL_TZ } };
-
-  return EnergyReading.aggregate([
-    { $match: match },
-    { $group: { _id: gid, energy: { $sum: '$energyConsumption' }, count: { $sum: 1 }, savings: { $sum: { $max: [0, { $subtract: ['$potentialApplianceEnergy', '$applianceEnergy'] }] } } } },
-    { $sort: { _id: 1 } }
-  ]).catch(() => []);
-}
-
 export async function buildReport({ type = 'day', from, to } = {}) {
   const now = new Date();
   const fromDate = startOfRange(type, from ? new Date(from) : now);
   const toDate = to ? new Date(to) : new Date(now.getTime() + 86400000);
 
-  const [period, buildings, rooms, predictions, alerts] = await Promise.all([
-    byPeriod(type, fromDate, toDate),
+  const match = { timestamp: { $gte: fromDate, $lte: toDate } };
+  const periodId = type === 'day'
+    ? { $dateToString: { format: '%Y-%m-%d %H:00', date: '$timestamp', timezone: LOCAL_TZ } }
+    : { $dateToString: { format: '%Y-%m-%d', date: '$timestamp', timezone: LOCAL_TZ } };
+
+  const [energy, buildings, rooms, predictions, alerts] = await Promise.all([
+    EnergyReading.aggregate([
+      { $match: match },
+      {
+        $facet: {
+          period: [
+            { $group: { _id: periodId, energy: { $sum: '$energyConsumption' }, count: { $sum: 1 }, savings: { $sum: { $max: [0, { $subtract: ['$potentialApplianceEnergy', '$applianceEnergy'] }] } } } },
+            { $sort: { _id: 1 } }
+          ],
+          byBuilding: [
+            { $group: { _id: '$buildingId', energy: { $sum: '$energyConsumption' }, count: { $sum: 1 } } },
+            { $sort: { energy: -1 } }
+          ],
+          byRoom: [
+            { $group: { _id: '$roomId', energy: { $sum: '$energyConsumption' }, count: { $sum: 1 } } },
+            { $sort: { energy: -1 } }
+          ],
+          totals: [
+            { $group: { _id: null, total: { $sum: '$energyConsumption' }, count: { $sum: 1 }, saved: { $sum: { $max: [0, { $subtract: ['$potentialApplianceEnergy', '$applianceEnergy'] }] } } } }
+          ]
+        }
+      }
+    ]),
     Building.find({}).lean(),
     Classroom.find({}).populate('buildingId', 'name code').lean(),
     Prediction.find({ status: 'abnormal', createdAt: { $gte: fromDate } }).countDocuments(),
     Alert.find({ resolvedAt: { $gte: fromDate, $lte: toDate } }).countDocuments()
   ]);
 
-  const buildingRows = await energyService.energyByBuildingSince(fromDate);
+  const result = energy[0] || { period: [], byBuilding: [], byRoom: [], totals: [] };
+  const totals = result.totals[0] || { total: 0, count: 0, saved: 0 };
   const buildingMap = new Map(buildings.map((b) => [b._id.toString(), b]));
-  const buildingWise = buildingRows.map((r) => ({
+  const buildingWise = result.byBuilding.map((r) => ({
     buildingId: r._id,
     name: buildingMap.get(r._id.toString())?.name || 'Unknown',
     code: buildingMap.get(r._id.toString())?.code || '',
     energy: Number(r.energy.toFixed(2))
   }));
 
-  const roomRows = await energyService.energyByRoomSince(fromDate);
   const roomMap = new Map(rooms.map((r) => [r._id.toString(), r]));
-  const roomWise = roomRows.map((r) => {
+  const roomWise = result.byRoom.map((r) => {
     const room = roomMap.get(r._id.toString());
     return {
       roomId: r._id,
@@ -74,17 +82,14 @@ export async function buildReport({ type = 'day', from, to } = {}) {
     };
   });
 
-  const saved = Number((await energyService.energySavedSince(fromDate)).toFixed(2));
-  const totals = await energyService.totalEnergySince(fromDate);
-
   return {
     range: { from: fromDate, to: toDate, type },
-    totalEnergy: totals.total,
+    totalEnergy: Number(totals.total.toFixed(3)),
     readings: totals.count,
-    energySaved: saved,
+    energySaved: Number(totals.saved.toFixed(2)),
     anomalies: predictions,
     resolvedAlerts: alerts,
-    period: period.map((p) => ({ label: p._id, energy: Number(p.energy.toFixed(2)), sav: Number(p.savings.toFixed(2)) })),
+    period: result.period.map((p) => ({ label: p._id, energy: Number(p.energy.toFixed(2)), sav: Number(p.savings.toFixed(2)) })),
     byBuilding: buildingWise,
     byRoom: roomWise
   };
