@@ -72,7 +72,8 @@ def main():
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    model = RandomForestRegressor(n_estimators=250, random_state=42, n_jobs=-1)
+    # Keep the serialized model small enough for the 512 MB Render instance.
+    model = RandomForestRegressor(n_estimators=50, random_state=42, n_jobs=-1)
     pipe = build_pipeline(model)
     pipe.fit(X_train, y_train)
 
