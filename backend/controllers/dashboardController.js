@@ -28,14 +28,12 @@ export const getSummary = asyncHandler(async (req, res) => {
   const activeLights = rooms.filter((r) => r.lightStatus === 'on').length;
   const activeFans = rooms.filter((r) => r.fanStatus === 'on').length;
 
-  const chartRange = await Promise.all(
-    rooms.map(async (r) => {
-      const last = await EnergyReading.findOne({ roomId: r._id }).sort({ timestamp: -1 }).lean();
-      return last;
-    })
-  );
+  const chartRange = await EnergyReading.aggregate([
+    { $sort: { roomId: 1, timestamp: -1 } },
+    { $group: { _id: '$roomId', hourlyRate: { $first: '$hourlyRate' } } }
+  ]);
 
-  const actualLast = chartRange.reduce((sum, r) => sum + (r ? r.hourlyRate : 0), 0);
+  const actualLast = chartRange.reduce((sum, r) => sum + (r.hourlyRate || 0), 0);
   const predictedSum = rooms.reduce((sum, r) => sum + (r.predictedEnergy || 0), 0);
 
   res.json({
