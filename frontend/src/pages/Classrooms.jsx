@@ -68,7 +68,7 @@ export default function Classrooms() {
             <thead className="bg-slate-50/70">
               <tr>
                 <th className="th">Room</th>
-                <th className="th">Faculty</th>
+                <th className="th">Faculty / phone</th>
                 <th className="th">Occupancy</th>
                 <th className="th">Lights</th>
                 <th className="th">Fans</th>
@@ -87,7 +87,15 @@ export default function Classrooms() {
                     <Link to={`/classrooms/${r._id}`} className="font-bold text-brand-600 hover:underline">{r.roomNumber}</Link>
                     <p className="text-xs text-slate-400">{r.buildingId?.name || ''} · Floor {r.floor}</p>
                   </td>
-                  <td className="td"><RoomTypeTag type={r.type} /><p className="mt-0.5 truncate text-xs text-slate-400">{r.facultyId?.name || 'Unassigned'}</p></td>
+                  <td className="td">
+                    <RoomTypeTag type={r.type} />
+                    <p className="mt-0.5 truncate text-xs text-slate-400">{r.facultyId?.name || 'Unassigned'}</p>
+                    {r.facultyId?.phoneNumber ? (
+                      <a href={`tel:${r.facultyId.phoneNumber}`} className="mt-0.5 block text-xs font-semibold text-brand-600 hover:underline">
+                        {r.facultyId.phoneNumber}
+                      </a>
+                    ) : null}
+                  </td>
                   <td className="td">
                     <span className="font-semibold">{r.currentOccupancy}/{r.capacity}</span>
                     {r.expectedOccupancy > 0 && <span className="ml-1 text-xs text-slate-400">exp {r.expectedOccupancy}</span>}

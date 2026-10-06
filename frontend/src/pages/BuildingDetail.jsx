@@ -1,9 +1,9 @@
 import { useParams, Link } from 'react-router-dom';
 import { Building2, Zap, Users, AlertTriangle, DoorOpen, ArrowLeft } from 'lucide-react';
 import { usePolling } from '../hooks/useApi.js';
+import api from '../api/client.js';
 import { PageLoader, ErrorState } from '../components/Feedback.jsx';
 import { StatusBadge, OnOffBadge } from '../components/Badges.jsx';
-import CallFaculty from '../components/CallFaculty.jsx';
 import { formatKwh, formatNumber } from '../utils/format.js';
 
 export default function BuildingDetail() {
@@ -78,7 +78,7 @@ export default function BuildingDetail() {
                 <th className="th text-right">Total usage</th>
                 <th className="th text-right">Now</th>
                 <th className="th">Status</th>
-                <th className="th" />
+                <th className="th">Faculty phone</th>
               </tr>
             </thead>
             <tbody>
@@ -95,13 +95,13 @@ export default function BuildingDetail() {
                   <td className="td text-right">{formatKwh(r.currentEnergy, 2)}</td>
                   <td className="td"><StatusBadge status={r.status} /></td>
                   <td className="td text-right">
-                    <CallFaculty
-                      compact
-                      classroomId={r._id}
-                      roomNumber={r.roomNumber}
-                      facultyName={r.facultyId?.name}
-                      disabled={!r.facultyId}
-                    />
+                    {r.facultyId?.phoneNumber ? (
+                      <a href={`tel:${r.facultyId.phoneNumber}`} className="font-semibold text-brand-600 hover:underline">
+                        {r.facultyId.phoneNumber}
+                      </a>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
                   </td>
                 </tr>
               ))}

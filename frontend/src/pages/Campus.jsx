@@ -6,7 +6,6 @@ import api from '../api/client.js';
 import { PageHeader } from '../components/PageHeader.jsx';
 import { PageLoader, ErrorState, EmptyState } from '../components/Feedback.jsx';
 import { StatusBadge, OnOffBadge, RoomTypeTag } from '../components/Badges.jsx';
-import CallFaculty from '../components/CallFaculty.jsx';
 import { formatKwh, formatNumber } from '../utils/format.js';
 
 export default function Campus() {
@@ -141,7 +140,7 @@ export default function Campus() {
                   <th className="th text-right">Deviation</th>
                   <th className="th text-right">Total/kWh</th>
                   <th className="th">Status</th>
-                  <th className="th" />
+                  <th className="th">Faculty phone</th>
                 </tr>
               </thead>
               <tbody>
@@ -168,13 +167,13 @@ export default function Campus() {
                     <td className="td text-right">{formatNumber(r.totalEnergy, 0)}</td>
                     <td className="td"><StatusBadge status={r.status} /></td>
                     <td className="td text-right">
-                      <CallFaculty
-                        compact
-                        classroomId={r._id}
-                        roomNumber={r.roomNumber}
-                        facultyName={r.facultyId?.name}
-                        disabled={!r.facultyId}
-                      />
+                      {r.facultyId?.phoneNumber ? (
+                        <a href={`tel:${r.facultyId.phoneNumber}`} className="font-semibold text-brand-600 hover:underline">
+                          {r.facultyId.phoneNumber}
+                        </a>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
                     </td>
                   </tr>
                 ))}
