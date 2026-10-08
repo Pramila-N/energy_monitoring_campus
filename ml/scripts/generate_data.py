@@ -6,6 +6,12 @@ synthetic energy follows the same physical model the backend simulation uses
 (single source of truth). The data includes normal and abnormal examples so the
 anomaly-detection demo has realistic variance.
 
+The campus runs 24/7: rows are generated for EVERY hour (0-23) of EVERY
+calendar day (Mon-Sun), including night/weekend idle rows, so predictions stay
+correct outside class hours. Schedule rules mirror
+backend/mock-data/timetable.js (library open all hours; weekend operating
+types; period 0 = off-hours).
+
 Outputs:
     ml/data/training_data.csv              (energy model)
     ml/data/occupancy_training_data.csv    (occupancy model)
@@ -14,7 +20,6 @@ Each row also carries an artificial calendar date + day_index so training can
 hold out the FINAL month chronologically (one month of unseen "future" test
 data after ~3 months of training data) — exactly the demo shown to faculty.
 """
-import argparse
 import argparse
 import math
 import os
@@ -39,10 +44,35 @@ ENERGY_PROFILES = {
     "chemistry_lab":   {"equipment": 1.1, "occ_scale": 1.2, "idle": 0.45},
     "electronics_lab": {"equipment": 1.0, "occ_scale": 1.2, "idle": 0.40},
     "staff_room":      {"equipment": 0.4, "occ_scale": 0.8, "idle": 0.50},
+    "library":         {"equipment": 0.35, "occ_scale": 1.1, "idle": 0.30},
+    "placement_cell":  {"equipment": 0.3, "occ_scale": 0.9, "idle": 0.40},
+    "conference_hall": {"equipment": 0.7, "occ_scale": 1.7, "idle": 0.25},
+    "academic_lab":    {"equipment": 0.9, "occ_scale": 1.3, "idle": 0.40},
+    "special_lab":     {"equipment": 1.3, "occ_scale": 1.4, "idle": 0.50},
 }
 
-DAY_EFFECT = {1: 1.0, 2: 1.02, 3: 0.98, 4: 0.96, 5: 0.90, 6: 0.70, 0: 0.40}
-PERIOD_EFFECT = {1: 1.0, 2: 1.0, 3: 0.99, 4: 0.94, 5: 0.88, 6: 0.80, 7: 0.72, 8: 0.65}
+# Mirrors backend/mock-data/occupancy.js dayEffect/periodEffect (Mon=1..Sun=7;
+# period 0 = off-hours, periods 1-15 = 09:00-23:00 class windows incl night batches).
+DAY_EFFECT = {1: 1.0, 2: 1.02, 3: 0.98, 4: 0.96, 5: 0.90, 6: 0.70, 7: 0.45, 0: 0.40}
+PERIOD_EFFECT = {
+    0: 0.30, 1: 1.0, 2: 1.0, 3: 0.99, 4: 0.94, 5: 0.88, 6: 0.80, 7: 0.72, 8: 0.65,
+    9: 0.62, 10: 0.58, 11: 0.55, 12: 0.52, 13: 0.50, 14: 0.48, 15: 0.46,
+}
+
+# Mirrors backend/mock-data/timetable.js schedule rules.
+LAB_TYPES = [
+    "computer_lab", "physics_lab", "chemistry_lab", "electronics_lab",
+    "seminar_hall", "academic_lab", "special_lab", "conference_hall",
+]
+OPEN_ALL_HOURS_TYPES = {"library"}
+OPEN_DAYS = {  # last weekday a type operates (1=Mon..7=Sun); default 5
+    "staff_room": 6,
+    "conference_hall": 6,
+    "placement_cell": 5,
+    "computer_lab": 7,
+    "academic_lab": 7,
+    "special_lab": 7,
+}
 
 
 def js_hash(s):
@@ -92,13 +122,47 @@ def parse_rooms_js():
     return rooms
 
 
-def period_plan(room_number, rng, is_lab):
-    """Deterministic-ish occupied periods per day for a room."""
-    for day in range(1, 6):
-        count = (2 + rng.randint(0, 3)) if is_lab else (3 + rng.randint(0, 5))
-        available = list(range(1, 9))
-        rng.shuffle(available)
-        yield day, sorted(available[:count])
+def period_for_hour(hour):
+    """Same rule as timetable.js periodForHour(): class periods run 09:00-23:00
+    (period 1..15 = hour - 8, so evening/night batches are normal classes);
+    00:00-08:00 are deep off-hours (period 0)."""
+    if hour < 9:
+        return 0
+    return hour - 8
+
+
+def scheduled_periods(room_type, day, rng):
+    """Set of scheduled periods (0..15) for a room on a weekday-numbered day,
+    mirroring timetable.js buildTimetable()."""
+    if room_type in OPEN_ALL_HOURS_TYPES:
+        return set(range(0, 16))  # library: every hour of every day
+    if day > OPEN_DAYS.get(room_type, 5):
+        return set()  # closed that day (weekends for most types)
+    if day >= 6:
+        count = 2 + rng.randint(0, 2)  # reduced weekend schedule
+    elif room_type == "staff_room":
+        return set(range(1, 16))  # staff on duty all class hours (09:00-23:00)
+    elif room_type in LAB_TYPES:
+        count = 2 + rng.randint(0, 2)
+    else:
+        count = 3 + rng.randint(0, 4)
+
+    periods = []
+    p = 1 + rng.randint(0, 7)
+    while len(periods) < count and p <= 15:
+        periods.append(p)
+        if room_type in LAB_TYPES and day < 6:
+            p += rng.randint(0, 2)  # some labs run 2-3 period blocks
+        p += 1
+        if len(periods) < count:
+            p += rng.randint(0, 1)
+    return set(periods)
+
+
+def expected_occupancy(room, day, period, expected_rate):
+    if room["type"] == "staff_room":
+        return 6 + (day % 3)
+    return max(4, round(room["capacity"] * expected_rate))
 
 
 def room_draw(room, occupancy, lights_on, fans_on):
@@ -119,34 +183,46 @@ def actual_attendance_rate(room_number, dow, period, rng):
     return max(0.15, min(1.0, rate))
 
 
-def generate_energy_data(rooms, week_index, seed, start_date):
+def day_plan(room, week_index, sched_seed):
+    """Yield (day, date, dow, scheduled_periods) for all 7 days of the week.
+    Seeded per room so each room gets its own stable weekly schedule."""
+    rng = random.Random(f"{sched_seed}|{room['roomNumber']}")
+    for day in range(1, 8):
+        day_offset = week_index * 7 + day - 1
+        date = START_DATE + timedelta(days=day_offset)
+        dow = date.weekday() + 1  # Mon=1..Sun=7 (backend academicDay)
+        yield day, date, dow, scheduled_periods(room["type"], day, rng)
+
+
+def generate_energy_data(rooms, week_index, seed):
     rng = random.Random(seed)
     rows = []
     for room in rooms:
-        is_lab = room["type"] in ("computer_lab", "physics_lab", "chemistry_lab", "electronics_lab")
         expected_rate = 0.5 + rng.random() * 0.45
-        prev_energy = 0.0
         chronological = []
-        for day, periods in period_plan(room["roomNumber"], rng, is_lab):
-            day_offset = week_index * 7 + day - 1
-            date_str = (start_date + timedelta(days=day_offset)).isoformat()
-            for period in periods:
-                expected = round(room["capacity"] * expected_rate * (0.9 + (rng.random() - 0.5) * 0.2))
-                present = round(expected * actual_attendance_rate(room["roomNumber"], day, period, rng))
+        for day, date, dow, sched in day_plan(room, week_index, seed):
+            date_str = date.isoformat()
+            for hour in range(24):
+                period = period_for_hour(hour)
+                is_open = period in sched
+                present = 0
+                if is_open:
+                    expected = expected_occupancy(room, day, period, expected_rate)
+                    rate = actual_attendance_rate(room["roomNumber"], dow, period, rng)
+                    present = min(room["capacity"], int(round(expected * rate)))
                 lights_on = 1 if present > 0 else (1 if rng.random() < 0.06 else 0)
                 fans_on = 1 if present > 0 else (1 if rng.random() < 0.04 else 0)
                 draw = room_draw(room, present, lights_on, fans_on)
-                if rng.random() < 0.04:
-                    draw *= 1.45 + rng.random() * 0.45  # injected anomaly
+                if present > 0 and period >= 1 and rng.random() < 0.04:
+                    draw *= 1.45 + rng.random() * 0.45  # injected anomaly (occupied rooms, day or night)
                 draw *= 0.955 + rng.random() * 0.09     # ±4.5% meter noise
-                hour = 8 + period
                 chronological.append({
                     "room_id": room["roomNumber"],
                     "building": room["building"],
                     "room_type": room["type"],
                     "hour": hour,
                     "period": period,
-                    "day_of_week": day,
+                    "day_of_week": dow,
                     "occupancy": present,
                     "capacity": room["capacity"],
                     "lights_on": lights_on,
@@ -154,9 +230,9 @@ def generate_energy_data(rooms, week_index, seed, start_date):
                     "historical_energy": 0.0,
                     "actual_energy": round(draw, 3),
                     "date": date_str,
-                    "day_index": day_offset,
+                    "day_index": week_index * 7 + day - 1,
                 })
-        # fill lag feature (historical_energy = previous period's actual energy)
+        # fill lag feature (historical_energy = previous hour's actual energy)
         for i, row in enumerate(chronological):
             if i > 0:
                 row["historical_energy"] = round(chronological[i - 1]["actual_energy"] * (0.97 + rng.random() * 0.06), 3)
@@ -166,23 +242,29 @@ def generate_energy_data(rooms, week_index, seed, start_date):
     return rows
 
 
-def generate_occupancy_data(rooms, week_index, seed, start_date):
+def generate_occupancy_data(rooms, week_index, seed):
     rng = random.Random(seed + 1000)
     rows = []
     for room in rooms:
-        is_lab = room["type"] in ("computer_lab", "physics_lab", "chemistry_lab", "electronics_lab")
-        for day, periods in period_plan(room["roomNumber"], rng, is_lab):
-            day_offset = week_index * 7 + day - 1
-            date_str = (start_date + timedelta(days=day_offset)).isoformat()
-            for period in periods:
-                expected = round(room["capacity"] * (0.5 + rng.random() * 0.45))
-                rate = actual_attendance_rate(room["roomNumber"], day, period, rng)
-                present = min(room["capacity"], int(round(expected * rate)))
+        expected_rate = 0.5 + rng.random() * 0.45
+        for day, date, dow, sched in day_plan(room, week_index, seed):
+            date_str = date.isoformat()
+            for hour in range(24):
+                period = period_for_hour(hour)
+                is_open = period in sched
+                if is_open:
+                    expected = expected_occupancy(room, day, period, expected_rate)
+                    rate = actual_attendance_rate(room["roomNumber"], dow, period, rng)
+                    present = min(room["capacity"], int(round(expected * rate)))
+                else:
+                    expected = 0
+                    rate = 0.0  # closed room -> model must predict a zero rate
+                    present = 0
                 rows.append({
                     "room_id": room["roomNumber"],
                     "building": room["building"],
                     "room_type": room["type"],
-                    "day_of_week": day,
+                    "day_of_week": dow,
                     "period": period,
                     "expected_occupancy": expected,
                     "capacity": room["capacity"],
@@ -191,7 +273,7 @@ def generate_occupancy_data(rooms, week_index, seed, start_date):
                     "actual_attendance_rate": round(rate, 4),
                     "actual_present": present,
                     "date": date_str,
-                    "day_index": day_offset,
+                    "day_index": week_index * 7 + day - 1,
                 })
     return rows
 
@@ -215,8 +297,8 @@ def main():
     energy_rows = []
     occ_rows = []
     for w in range(weeks):
-        energy_rows.extend(generate_energy_data(rooms, w, args.seed + w, START_DATE))
-        occ_rows.extend(generate_occupancy_data(rooms, w, args.seed + w, START_DATE))
+        energy_rows.extend(generate_energy_data(rooms, w, args.seed + w))
+        occ_rows.extend(generate_occupancy_data(rooms, w, args.seed + w))
 
     energy_file = os.path.join(DATA_DIR, "training_data.csv")
     with open(energy_file, "w") as f:
@@ -230,7 +312,7 @@ def main():
         for r in occ_rows:
             f.write(",".join(str(r[k]) for k in ["room_id", "building", "room_type", "day_of_week", "period", "expected_occupancy", "capacity", "faculty_id", "faculty_avg_attendance", "actual_attendance_rate", "actual_present", "date", "day_index"]) + "\n")
 
-    print(f"Generated {len(energy_rows)} energy rows ({weeks} weeks total; last {args.test_days} calendar days are held out as the future test month) -> {energy_file}")
+    print(f"Generated {len(energy_rows)} energy rows ({weeks} weeks x 7 days x 24 hours; last {args.test_days} calendar days are held out as the future test month) -> {energy_file}")
     print(f"Generated {len(occ_rows)} occupancy rows -> {occ_file}")
 
 

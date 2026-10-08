@@ -4,7 +4,7 @@ import { usePolling } from '../hooks/useApi.js';
 import api from '../api/client.js';
 import { PageLoader, ErrorState } from '../components/Feedback.jsx';
 import { StatusBadge, OnOffBadge } from '../components/Badges.jsx';
-import { formatKwh, formatNumber } from '../utils/format.js';
+import { formatKwh, formatNumber, isAbnormalStatus } from '../utils/format.js';
 
 export default function BuildingDetail() {
   const { id } = useParams();
@@ -57,7 +57,7 @@ export default function BuildingDetail() {
         </div>
         <div className="card p-4">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase text-slate-400"><AlertTriangle size={14} className="text-danger" /> Abnormal</div>
-          <p className="mt-1 text-xl font-bold">{rooms.filter((r) => r.status === 'abnormal').length}</p>
+          <p className="mt-1 text-xl font-bold">{rooms.filter((r) => isAbnormalStatus(r.status)).length}</p>
         </div>
       </div>
 
@@ -78,7 +78,7 @@ export default function BuildingDetail() {
                 <th className="th text-right">Total usage</th>
                 <th className="th text-right">Now</th>
                 <th className="th">Status</th>
-                <th className="th">Faculty phone</th>
+                <th className="th">Faculty</th>
               </tr>
             </thead>
             <tbody>
@@ -95,13 +95,12 @@ export default function BuildingDetail() {
                   <td className="td text-right">{formatKwh(r.currentEnergy, 2)}</td>
                   <td className="td"><StatusBadge status={r.status} /></td>
                   <td className="td text-right">
+                    <div className="text-xs font-semibold text-slate-700">{r.facultyId?.name || r.assignedFaculty || '—'}</div>
                     {r.facultyId?.phoneNumber ? (
-                      <a href={`tel:${r.facultyId.phoneNumber}`} className="font-semibold text-brand-600 hover:underline">
+                      <a href={`tel:${r.facultyId.phoneNumber}`} className="text-[11px] font-medium text-brand-600 hover:underline">
                         {r.facultyId.phoneNumber}
                       </a>
-                    ) : (
-                      <span className="text-slate-400">—</span>
-                    )}
+                    ) : null}
                   </td>
                 </tr>
               ))}

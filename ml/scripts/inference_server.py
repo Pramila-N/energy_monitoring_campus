@@ -69,14 +69,20 @@ def predict_energy(records, present_map=None):
             df[c] = df[c].astype(str)
         y_pred = pipe.predict(df[ENERGY_FEATURES])
 
+    # Confidence = agreement across the forest's trees. Trees were fitted on
+    # the TRANSFORMED matrix (no feature names), so predict on that — not on
+    # the raw DataFrame (which still contains string columns like building).
+    conf = np.ones(len(df))
     model = pipe.named_steps.get("model")
     if hasattr(model, "estimators_"):
-        per_tree = np.array([t.predict(df[ENERGY_FEATURES]) for t in model.estimators_])
-        std = per_tree.std(axis=0)
-        mean = np.abs(per_tree.mean(axis=0)) + 1e-6
-        conf = np.clip(1 - std / mean, 0.0, 1.0)
-    else:
-        conf = np.ones(len(df))
+        try:
+            Xt = pipe.named_steps["pre"].transform(df[ENERGY_FEATURES])
+            per_tree = np.array([t.predict(Xt) for t in model.estimators_])
+            std = per_tree.std(axis=0)
+            mean = np.abs(per_tree.mean(axis=0)) + 1e-6
+            conf = np.clip(1 - std / mean, 0.0, 1.0)
+        except Exception:
+            conf = np.ones(len(df))
 
     out = []
     for i, rec in enumerate(records):

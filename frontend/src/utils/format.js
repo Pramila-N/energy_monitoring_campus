@@ -55,22 +55,37 @@ export function timeAgo(value) {
 }
 
 export function statusOf(pct) {
-  const abs = Math.abs(Number(pct) || 0);
-  if (abs > 20) return 'abnormal';
-  if (abs > 10) return 'warning';
+  const n = Number(pct) || 0;
+  if (n > 60) return 'critical';
+  if (n > 40) return 'high';
+  if (n > 20) return 'abnormal';
+  if (n > 10) return 'warning';
   return 'normal';
+}
+
+/** Abnormal group = abnormal/high/critical (shared by status and severity). */
+export function isAbnormalStatus(status) {
+  return status === 'abnormal' || status === 'high' || status === 'critical';
+}
+
+/** Collapse the 5-level label into the 3 tabs (normal/warning/abnormal). */
+export function statusGroup(status) {
+  if (status === 'normal') return 'normal';
+  if (status === 'warning') return 'warning';
+  return 'abnormal';
 }
 
 export function statusColor(status) {
   switch (status) {
+    case 'critical':
     case 'abnormal':
       return 'text-danger bg-red-50 border border-red-200';
     case 'warning':
       return 'text-warn bg-amber-50 border border-amber-200';
     case 'normal':
       return 'text-ok bg-green-50 border border-green-200';
-    case 'critical':
-      return 'text-danger bg-red-50 border border-red-200';
+    case 'high':
+      return 'text-orange-600 bg-orange-50 border border-orange-200';
     default:
       return 'text-slate-600 bg-slate-100 border border-slate-200';
   }
@@ -79,12 +94,15 @@ export function statusColor(status) {
 export function severityColor(severity) {
   switch (severity) {
     case 'critical':
+    case 'abnormal':
       return 'text-danger bg-red-50 border border-red-200';
     case 'high':
       return 'text-orange-600 bg-orange-50 border border-orange-200';
     case 'medium':
+    case 'warning':
       return 'text-warn bg-amber-50 border border-amber-200';
     case 'low':
+    case 'normal':
       return 'text-info bg-sky-50 border border-sky-200';
     default:
       return 'text-slate-600 bg-slate-100 border border-slate-200';
@@ -100,6 +118,11 @@ export function roomTypeLabel(t) {
     electronics_lab: 'Electronics Lab',
     seminar_hall: 'Seminar Hall',
     staff_room: 'Staff Room',
+    library: 'Library',
+    placement_cell: 'Placement Cell',
+    conference_hall: 'Conference Hall',
+    academic_lab: 'Academic Lab',
+    special_lab: 'Special Lab',
     lecture: 'Lecture Hall',
     lab: 'Laboratory'
   };

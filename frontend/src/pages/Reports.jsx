@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { BarChart3, Download, Building2, DoorOpen, Leaf, AlertTriangle } from 'lucide-react';
+import { BarChart3, Download, Building2, DoorOpen, Leaf, AlertTriangle, CalendarRange, CheckCircle2 } from 'lucide-react';
 import { useApi } from '../hooks/useApi.js';
 import api from '../api/client.js';
 import { useToast } from '../context/ToastContext.jsx';
@@ -11,27 +11,61 @@ import { formatNumber } from '../utils/format.js';
 const TYPES = [
   { k: 'day', label: 'Today' },
   { k: 'week', label: 'Last 7 days' },
-  { k: 'month', label: 'Last month' }
+  { k: 'month', label: 'Last month' },
+  { k: 'custom', label: 'Calendar range' }
 ];
+
+function isoDate(d) {
+  const x = new Date(d);
+  const off = x.getTimezoneOffset();
+  return new Date(x.getTime() - off * 60000).toISOString().slice(0, 10);
+}
 
 export default function Reports() {
   const toast = useToast();
   const [type, setType] = useState('day');
-  const { data, loading, error, refetch } = useApi(() => api.get(`/reports?type=${type}`).then((r) => r.data), [type]);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [applied, setApplied] = useState(null);
+
+  const query = useMemo(() => {
+    const params = new URLSearchParams({ type });
+    if (type === 'custom') {
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
+    }
+    return params.toString();
+  }, [type, from, to]);
+
+  const { data, loading, error, refetch } = useApi(() => api.get(`/reports?${query}`).then((r) => r.data), [query]);
 
   const period = useMemo(() => (data?.period || []).map((p) => {
     let label = String(p.label || '');
-    label = type === 'day' ? label.slice(11, 16) : label.slice(5); // hourly -> "HH:00", daily -> "MM-DD"
+    if (type === 'day') label = label.slice(11, 16);
+    else if (type === 'custom') label = label.slice(0, 10);
+    else label = label.slice(5);
     return { ...p, label };
   }), [data, type]);
 
+  const rangeLabel = useMemo(() => {
+    if (type !== 'custom' || !applied) return '';
+    return `${applied.from || '…'} → ${applied.to || '…'}`;
+  }, [type, applied]);
+
+  const applyRange = () => {
+    if (!from && !to) return;
+    setApplied({ from, to });
+    refetch();
+  };
+
   const download = async () => {
     try {
-      const res = await api.get(`/reports/export.csv?type=${type}`, { responseType: 'blob' });
+      const res = await api.get(`/reports/export.csv?${query}`, { responseType: 'blob' });
       const url = URL.createObjectURL(new Blob([res.data]));
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'energy-report.csv';
+      const stamp = type === 'custom' ? `${from || 'from'}-${to || 'to'}` : type;
+      a.download = `energy-report-${stamp}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -46,6 +80,13 @@ export default function Reports() {
   if (error) return <ErrorState message={error} onRetry={refetch} />;
 
   const r = data;
+  const subtitle = type === 'day'
+    ? 'kWh per 30-min slot today'
+    : type === 'week'
+      ? 'kWh per day — last 7 days'
+      : type === 'month'
+        ? 'kWh per day — last month'
+        : `kWh per day — ${rangeLabel}`;
 
   return (
     <div className="fade-in space-y-6">
@@ -69,12 +110,29 @@ export default function Reports() {
         }
       />
 
+      {type === 'custom' && (
+        <div className="card flex flex-wrap items-end gap-3 p-4">
+          <div>
+            <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-400">From</label>
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="input" />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-400">To</label>
+            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="input" />
+          </div>
+          <button className="btn-primary" onClick={applyRange}>
+            <CalendarRange size={14} /> Apply
+          </button>
+          <p className="ml-auto text-xs text-slate-400">Pick any two dates — the calendar lets you browse across years.</p>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         {[
           { label: 'Total energy', value: `${formatNumber(r.totalEnergy, 1)} kWh`, icon: BarChart3, color: 'text-brand-500 bg-brand-50', sub: `${formatNumber(r.readings, 0)} readings` },
           { label: 'Energy saved', value: `${formatNumber(r.energySaved, 1)} kWh`, icon: Leaf, color: 'text-ok bg-green-50', sub: 'vs appliance baseline' },
           { label: 'Anomalies', value: formatNumber(r.anomalies, 0), icon: AlertTriangle, color: 'text-danger bg-red-50', sub: 'abnormal predictions' },
-          { label: 'Resolved alerts', value: formatNumber(r.resolvedAlerts, 0), icon: CheckIcon, color: 'text-warn bg-amber-50', sub: 'in period' }
+          { label: 'Resolved alerts', value: formatNumber(r.resolvedAlerts, 0), icon: CheckCircle2, color: 'text-warn bg-amber-50', sub: 'in period' }
         ].map((c) => (
           <div key={c.label} className="card flex items-center gap-4 p-5">
             <div className={`flex h-11 w-11 items-center justify-center rounded-lg ${c.color}`}><c.icon size={20} /></div>
@@ -88,7 +146,7 @@ export default function Reports() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <ChartCard title="Consumption trend" subtitle={type === 'day' ? 'kWh per 30-min slot today' : type === 'week' ? 'kWh per day — last 7 days' : 'kWh per day — last month'}>
+        <ChartCard title="Consumption trend" subtitle={subtitle}>
           {period.length === 1 ? (
             <div className="flex h-[280px] items-center justify-center text-sm text-slate-400">
               {period[0].label} · {formatNumber(period[0].energy, 1)} kWh
@@ -106,7 +164,7 @@ export default function Reports() {
           )}
         </ChartCard>
 
-        <ChartCard title="Consumption by building" subtitle={`Since ${new Date(Math.max(0, Date.now() - (type === 'month' ? 60 : type === 'week' ? 14 : 2) * 86400000)).toLocaleDateString()}`}>
+        <ChartCard title="Consumption by building" subtitle={`${type === 'custom' ? rangeLabel : `Range: ${new Date(r.range?.from).toLocaleDateString()} → ${new Date(r.range?.to).toLocaleDateString()}`}`}>
           <SimpleBars
             data={(r.byBuilding || []).map((b) => ({ label: b.name.replace(' Building', ''), energy: b.energy }))}
             xKey="label"
@@ -151,30 +209,28 @@ export default function Reports() {
           </div>
         </div>
 
-        <div className="card p-5">
-          <div className="flex items-center gap-2">
+        <div className="card overflow-hidden">
+          <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4">
             <DoorOpen size={16} className="text-info" />
             <h3 className="text-sm font-bold text-slate-800">Period breakdown</h3>
           </div>
-          <p className="mt-1 text-xs text-slate-500">{type === 'day' ? 'Hourly totals for today.' : type === 'week' ? 'Daily totals for the last 7 days.' : 'Daily totals across the last month.'}</p>
-          <div className="mt-4 space-y-2">
-            {(r.period || []).map((p) => (
-              <div key={p.label} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                <span className="font-semibold text-slate-600">{p.label}</span>
-                <span className="flex items-center gap-4">
-                  <span className="font-bold text-slate-800">{formatNumber(p.energy, 1)} kWh</span>
-                  <span className="badge bg-green-50 text-ok border border-green-200">{formatNumber(p.sav, 2)} saved</span>
-                </span>
-              </div>
-            ))}
-            {!r.period?.length && <p className="text-sm text-slate-400">No data in this window yet.</p>}
+          <p className="border-b border-slate-100 px-5 py-2 text-xs text-slate-500">{type === 'day' ? 'Hourly totals for today.' : type === 'custom' ? `Daily totals from ${rangeLabel || 'the selected range'}.` : type === 'week' ? 'Daily totals for the last 7 days.' : 'Daily totals across the last month.'}</p>
+          <div className="max-h-[420px] overflow-y-auto">
+            <div className="space-y-2 p-5">
+              {(r.period || []).map((p) => (
+                <div key={p.label} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                  <span className="font-semibold text-slate-600">{p.label}</span>
+                  <span className="flex items-center gap-4">
+                    <span className="font-bold text-slate-800">{formatNumber(p.energy, 1)} kWh</span>
+                    <span className="badge bg-green-50 text-ok border border-green-200">{formatNumber(p.sav, 2)} saved</span>
+                  </span>
+                </div>
+              ))}
+              {!r.period?.length && <p className="text-sm text-slate-400">No data in this window yet.</p>}
+            </div>
           </div>
         </div>
       </div>
     </div>
   );
-}
-
-function CheckIcon(props) {
-  return <Leaf {...props} />;
 }

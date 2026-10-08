@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
-export const ROOM_TYPES = ['classroom', 'computer_lab', 'physics_lab', 'chemistry_lab', 'electronics_lab', 'seminar_hall', 'staff_room'];
-export const ROOM_STATUS = ['normal', 'warning', 'abnormal', 'inactive'];
+export const ROOM_TYPES = ['classroom', 'computer_lab', 'physics_lab', 'chemistry_lab', 'electronics_lab', 'seminar_hall', 'staff_room', 'library', 'placement_cell', 'conference_hall', 'academic_lab', 'special_lab'];
+export const ROOM_STATUS = ['normal', 'warning', 'abnormal', 'high', 'critical', 'inactive'];
 
 const classroomSchema = new mongoose.Schema(
   {

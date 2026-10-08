@@ -6,7 +6,7 @@ import api from '../api/client.js';
 import { PageHeader } from '../components/PageHeader.jsx';
 import { PageLoader, ErrorState, EmptyState } from '../components/Feedback.jsx';
 import { StatusBadge, OnOffBadge, RoomTypeTag } from '../components/Badges.jsx';
-import { formatKwh, formatNumber, statusColor } from '../utils/format.js';
+import { formatKwh, formatNumber, statusColor, isAbnormalStatus, statusGroup } from '../utils/format.js';
 
 export default function Classrooms() {
   const { data, loading, error, refetch } = usePolling(() => api.get('/classrooms').then((r) => r.data), 60000);
@@ -16,7 +16,7 @@ export default function Classrooms() {
   const rooms = useMemo(() => {
     let list = data?.classrooms || [];
     if (q.trim()) list = list.filter((r) => r.roomNumber.toLowerCase().includes(q.trim().toLowerCase()));
-    if (status) list = list.filter((r) => r.status === status);
+    if (status) list = list.filter((r) => statusGroup(r.status) === status);
     return list;
   }, [data, q, status]);
 
@@ -26,7 +26,7 @@ export default function Classrooms() {
   const counts = {
     normal: (data.classrooms || []).filter((r) => r.status === 'normal').length,
     warning: (data.classrooms || []).filter((r) => r.status === 'warning').length,
-    abnormal: (data.classrooms || []).filter((r) => r.status === 'abnormal').length
+    abnormal: (data.classrooms || []).filter((r) => isAbnormalStatus(r.status)).length
   };
 
   return (

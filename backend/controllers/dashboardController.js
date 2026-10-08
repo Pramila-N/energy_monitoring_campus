@@ -23,7 +23,9 @@ export const getSummary = asyncHandler(async (req, res) => {
     mlService.modelStatus()
   ]);
 
-  const abnormalRooms = rooms.filter((r) => r.status === 'abnormal').length;
+  const ABNORMAL_STATUS = ['abnormal', 'high', 'critical'];
+
+  const abnormalRooms = rooms.filter((r) => ABNORMAL_STATUS.includes(r.status)).length;
   const activeRooms = rooms.filter((r) => r.currentOccupancy > 0).length;
   const activeLights = rooms.filter((r) => r.lightStatus === 'on').length;
   const activeFans = rooms.filter((r) => r.fanStatus === 'on').length;
@@ -59,7 +61,7 @@ export const getSummary = asyncHandler(async (req, res) => {
 });
 
 export const getInsights = asyncHandler(async (req, res) => {
-  const abnormal = await Classroom.find({ status: 'abnormal' })
+  const abnormal = await Classroom.find({ status: { $in: ['abnormal', 'high', 'critical'] } })
     .populate('buildingId', 'name code')
     .populate('facultyId', 'name')
     .lean();

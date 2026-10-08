@@ -1,12 +1,11 @@
-import { useMemo, useState } from 'react';
-import { BrainCircuit, RefreshCw, Target, Scale, Gauge, Cpu } from 'lucide-react';
+import { useMemo } from 'react';
+import { BrainCircuit, Target, Scale, Gauge, Cpu } from 'lucide-react';
 import { usePolling } from '../hooks/useApi.js';
 import api from '../api/client.js';
 import { PageHeader } from '../components/PageHeader.jsx';
-import { PageLoader, ErrorState, EmptyState, Spinner } from '../components/Feedback.jsx';
+import { PageLoader, ErrorState, EmptyState } from '../components/Feedback.jsx';
 import { StatusBadge } from '../components/Badges.jsx';
 import { ChartCard, SimpleBars, CHART_COLORS } from '../components/charts.jsx';
-import { useToast } from '../context/ToastContext.jsx';
 import { formatNumber, formatPct, formatTimeStamp, formatKwh } from '../utils/format.js';
 
 function Metric({ label, value, sub, icon: Icon, className = 'text-brand-500 bg-brand-50' }) {
@@ -25,8 +24,6 @@ function Metric({ label, value, sub, icon: Icon, className = 'text-brand-500 bg-
 }
 
 export default function Predictions() {
-  const toast = useToast();
-  const [generating, setGenerating] = useState(false);
   const metrics = usePolling(() => api.get('/predictions/metrics').then((r) => r.data), 60000);
   const preds = usePolling(() => api.get('/predictions?limit=80').then((r) => r.data.predictions), 60000);
 
@@ -39,20 +36,6 @@ export default function Predictions() {
     });
     return [...map.values()].slice(0, 14);
   }, [preds.data]);
-
-  const generate = async () => {
-    setGenerating(true);
-    try {
-      const { data } = await api.post('/predictions/generate');
-      toast.success(data.message || 'Predictions regenerated.');
-      preds.refetch();
-      metrics.refetch();
-    } catch (e) {
-      toast.error(e?.response?.data?.message || 'Failed to generate predictions');
-    } finally {
-      setGenerating(false);
-    }
-  };
 
   if (metrics.loading && !metrics.data) return <PageLoader label="Loading AI model metrics…" />;
   if (metrics.error) return <ErrorState message={metrics.error} onRetry={metrics.refetch} />;
@@ -69,12 +52,6 @@ export default function Predictions() {
         title="AI Predictions"
         subtitle="Machine-learning forecasts against actual consumption"
         icon={BrainCircuit}
-        actions={
-          <button className="btn-primary" onClick={generate} disabled={generating}>
-            {generating ? <Spinner size={15} className="text-white" /> : <RefreshCw size={15} />}
-            {generating ? 'Generating…' : 'Generate now'}
-          </button>
-        }
       />
 
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">

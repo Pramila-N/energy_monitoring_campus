@@ -63,6 +63,9 @@ function spawnServer() {
 
     child.stdout.setEncoding('utf-8');
     child.stderr.setEncoding('utf-8');
+    // Swallow async pipe errors (ECONNRESET/EPIPE) — handled via exit/timeout.
+    child.stdin.on('error', () => {});
+    child.stdout.on('error', () => {});
 
     const rl = readline.createInterface({ input: child.stdout });
 
@@ -114,7 +117,7 @@ function spawnServer() {
 
 function request(op, records) {
   ensureReady();
-  if (!child || child.killed) {
+  if (!child || child.killed || !child.stdin || !child.stdin.writable) {
     return Promise.reject(new Error('ML server is not available.'));
   }
   return new Promise((resolve, reject) => {
@@ -127,7 +130,13 @@ function request(op, records) {
       }
     }, REQUEST_TIMEOUT_MS);
     pending.set(id, { resolve, reject, timer });
-    child.stdin.write(JSON.stringify({ id, op, records }) + '\n');
+    try {
+      child.stdin.write(JSON.stringify({ id, op, records }) + '\n');
+    } catch (e) {
+      pending.delete(id);
+      clearTimeout(timer);
+      reject(e);
+    }
   });
 }
 

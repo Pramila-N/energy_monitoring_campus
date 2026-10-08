@@ -39,7 +39,24 @@ export const ROOMS = [
   { roomNumber: 'L-102', buildingCode: 'L', floor: 1, type: 'physics_lab', name: 'Physics Lab 2', capacity: 35, numLights: 10, numFans: 5, hasAC: false, faculty: 'Dr. Sunita Joshi' },
   { roomNumber: 'L-103', buildingCode: 'L', floor: 1, type: 'chemistry_lab', name: 'Chemistry Lab 1', capacity: 35, numLights: 12, numFans: 8, hasAC: false, faculty: 'Dr. Lakshmi Devi' },
   { roomNumber: 'L-201', buildingCode: 'L', floor: 2, type: 'electronics_lab', name: 'Electronics Lab', capacity: 30, numLights: 12, numFans: 6, hasAC: true, faculty: 'Prof. Venkat Raman' },
-  { roomNumber: 'L-202', buildingCode: 'L', floor: 2, type: 'chemistry_lab', name: 'Chemistry Lab 2', capacity: 30, numLights: 12, numFans: 6, hasAC: false, faculty: 'Dr. Anitha Menon' }
+  { roomNumber: 'L-202', buildingCode: 'L', floor: 2, type: 'chemistry_lab', name: 'Chemistry Lab 2', capacity: 30, numLights: 12, numFans: 6, hasAC: false, faculty: 'Dr. Anitha Menon' },
+
+  // ---- Library (24/7, across floors) + Placement Cell ----
+  { roomNumber: 'A-104', buildingCode: 'A', floor: 1, type: 'library', name: 'Central Library — Ground Floor', capacity: 150, numLights: 24, numFans: 14, hasAC: true, faculty: 'Ms. Kavya Menon' },
+  { roomNumber: 'A-204', buildingCode: 'A', floor: 2, type: 'library', name: 'Central Library — Reading Hall', capacity: 120, numLights: 20, numFans: 12, hasAC: true, faculty: 'Ms. Kavya Menon' },
+  { roomNumber: 'A-303', buildingCode: 'A', floor: 3, type: 'placement_cell', name: 'Placement Cell', capacity: 30, numLights: 6, numFans: 4, hasAC: false, faculty: 'Mr. Joseph Thomas' },
+
+  // ---- Block B additions: conference hall + academic lab ----
+  { roomNumber: 'B-103', buildingCode: 'B', floor: 1, type: 'conference_hall', name: 'Conference Hall B', capacity: 120, numLights: 20, numFans: 12, hasAC: true, faculty: 'Prof. Arvind Gupta' },
+  { roomNumber: 'B-203', buildingCode: 'B', floor: 2, type: 'academic_lab', name: 'Research & Development Lab', capacity: 35, numLights: 10, numFans: 6, hasAC: true, faculty: 'Dr. Sneha Pillai' },
+
+  // ---- Block C additions: academic + special labs ----
+  { roomNumber: 'C-205', buildingCode: 'C', floor: 2, type: 'academic_lab', name: 'Data Science Lab', capacity: 40, numLights: 12, numFans: 6, hasAC: true, faculty: 'Dr. Fahim Ahmed' },
+  { roomNumber: 'C-306', buildingCode: 'C', floor: 3, type: 'special_lab', name: 'AI & Robotics Lab', capacity: 35, numLights: 12, numFans: 6, hasAC: true, faculty: 'Dr. Fahim Ahmed' },
+
+  // ---- Block L additions: special + academic labs ----
+  { roomNumber: 'L-203', buildingCode: 'L', floor: 2, type: 'special_lab', name: 'Biotech Special Lab', capacity: 30, numLights: 10, numFans: 5, hasAC: false, faculty: 'Dr. Sneha Pillai' },
+  { roomNumber: 'L-301', buildingCode: 'L', floor: 3, type: 'academic_lab', name: 'Applied Research Lab', capacity: 30, numLights: 10, numFans: 5, hasAC: true, faculty: 'Prof. Anand Verma' }
 ];
 
 export default ROOMS;

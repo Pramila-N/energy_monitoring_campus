@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 export const ALERT_TYPES = ['EXCESS_ENERGY', 'EMPTY_ROOM_APPLIANCES', 'HIGH_CONSUMPTION', 'SYSTEM_WARNING'];
-export const ALERT_SEVERITY = ['low', 'medium', 'high', 'critical'];
+export const ALERT_SEVERITY = ['low', 'medium', 'high', 'critical', 'warning', 'abnormal', 'normal'];
 export const ALERT_STATUS = ['active', 'contacted', 'resolved'];
 
 const alertSchema = new mongoose.Schema(

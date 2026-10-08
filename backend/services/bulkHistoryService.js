@@ -3,6 +3,7 @@ import Building from '../models/Building.js';
 import EnergyReading from '../models/EnergyReading.js';
 import OccupancyReading from '../models/OccupancyReading.js';
 import Alert from '../models/Alert.js';
+import Prediction from '../models/Prediction.js';
 import Recommendation from '../models/Recommendation.js';
 import { getSettings } from './settingsService.js';
 import mlService from './mlService.js';
@@ -10,7 +11,7 @@ import predictionService from './predictionService.js';
 import alertService from './alertService.js';
 import recommendationService from './recommendationService.js';
 import { computeRoomDraw } from '../mock-data/energyProfile.js';
-import { getExpectedOccupancyByRate, isRoomScheduled } from '../mock-data/timetable.js';
+import { getExpectedOccupancyByRate, isRoomScheduled, periodForHour } from '../mock-data/timetable.js';
 import { scenarioFor } from '../mock-data/scenarios.js';
 import { facultyAttendanceFactor, dayEffect, periodEffect } from '../mock-data/occupancy.js';
 
@@ -36,8 +37,8 @@ function seededRandom(seedStr) {
 /** Same expected-occupancy derivation the live simulator + ML pipeline use. */
 function expectedFor(room, period, academicDay) {
   const isStaff = room.type === 'staff_room';
-  if (isStaff) return 6 + (academicDay % 3);
   if (!isRoomScheduled(room.roomNumber, academicDay, period)) return 0;
+  if (isStaff) return 6 + (academicDay % 3);
   return Math.max(4, Math.round(room.capacity * (getExpectedOccupancyByRate(room.roomNumber) || 0.7)));
 }
 
@@ -50,15 +51,15 @@ function presenceFor(room, period, academicDay, dateStr, expected) {
   return Math.min(room.capacity, Math.round(expected * rate));
 }
 
-function lastWeekdayDates(weekdayCount) {
+function lastCalendarDates(dayCount) {
+  // 24/7 campus — every calendar day counts (weekends included); today always included.
   const dates = [];
   const cursor = new Date();
   cursor.setHours(0, 0, 0, 0);
-  dates.push(new Date(cursor)); // today is always an active (simulated) campus day so the Today report has data
+  dates.push(new Date(cursor));
   cursor.setDate(cursor.getDate() - 1);
-  while (dates.length < weekdayCount) {
-    const dow = cursor.getDay();
-    if (dow !== 0 && dow !== 6) dates.push(new Date(cursor));
+  while (dates.length < dayCount) {
+    dates.push(new Date(cursor));
     cursor.setDate(cursor.getDate() - 1);
   }
   return dates.reverse();
@@ -72,11 +73,14 @@ function isSameDay(a, b) {
   );
 }
 
-/** Periods elapsed so far today (1..8 → 09:00..16:00). 0 outside working hours. */
-function periodLimitFor(date) {
+/**
+ * 30-min slots elapsed so far today ({ lastHour, lastMinute }); full day for
+ * past dates. The campus simulates 24/7 — no weekday or business-hour limits.
+ */
+function slotLimitFor(date) {
   const now = new Date();
-  if (!isSameDay(date, now)) return 8;
-  return Math.min(8, Math.max(0, now.getHours() - 8 + (now.getMinutes() >= 30 ? 1 : 0)));
+  if (!isSameDay(date, now)) return { lastHour: 23, lastMinute: 30 };
+  return { lastHour: now.getHours(), lastMinute: now.getMinutes() >= 30 ? 30 : 0 };
 }
 
 /**
@@ -92,7 +96,7 @@ export async function generateBulkHistory({ days = 40, predictionDays = 3 } = {}
   const codeMap = new Map(buildingList.map((b) => [b._id.toString(), b.code]));
   const buildingById = new Map(buildingList.map((b) => [b._id.toString(), b._id]));
 
-  const dates = lastWeekdayDates(days);
+  const dates = lastCalendarDates(days);
   const modelReady = mlService.isEnergyModelReady();
   const predictionDates = new Set(
     (modelReady ? dates.slice(-predictionDays) : []).map((d) => d.toDateString())
@@ -100,119 +104,128 @@ export async function generateBulkHistory({ days = 40, predictionDays = 3 } = {}
 
   const readings = [];
   const occupancy = [];
+  const predictionDocs = [];
   const lastRate = new Map();
   let predictionTicks = 0;
 
   for (const date of dates) {
-    const now = new Date();
-    const academicDay = isSameDay(date, now) ? 3 : (date.getDay() + 6) % 7 + 1; // Mon=1..Fri=5 (today treated as mid-week)
+    const academicDay = (date.getDay() + 6) % 7 + 1; // Mon=1..Sun=7 (real calendar)
     const wantedPrediction = predictionDates.has(date.toDateString());
+    const { lastHour, lastMinute } = slotLimitFor(date);
+    const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
-    for (let period = 1; period <= periodLimitFor(date); period++) {
-      const hour = 8 + period;
-      const timestamp = new Date(date);
-      timestamp.setHours(hour, 0, 0, 0);
-      const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    for (let hour = 0; hour <= lastHour; hour++) {
+      const period = periodForHour(hour); // 0 = off-hours (24/7 campus)
+      const minutes = hour === lastHour ? (lastMinute >= 30 ? [0, 30] : [0]) : [0, 30];
 
-      const tickReadings = [];
-      const contexts = [];
+      for (const minute of minutes) {
+        const timestamp = new Date(date);
+        timestamp.setHours(hour, minute, 0, 0);
+        const slotKey = `${hour}-${minute}`;
+        const wantTickPrediction = wantedPrediction && minute === 0;
 
-      for (const room of rooms) {
-        const expected = expectedFor(room, period, academicDay);
-        const present = presenceFor(room, period, academicDay, dateStr, expected);
-        const scenario = scenarioFor(room.roomNumber);
-        const forcedEmpty =
-          scenario && scenario.effect === 'empty-room-appliances' && period >= 2 && period <= 6;
+        const tickReadings = [];
+        const contexts = [];
 
-        let lights = present > 0 ? 'on' : 'off';
-        let fans = present > 0 ? 'on' : 'off';
-        if (forcedEmpty) {
-          lights = 'on';
-          fans = 'off';
-        }
+        for (const room of rooms) {
+          const expected = expectedFor(room, period, academicDay);
+          const present = presenceFor(room, period, academicDay, dateStr, expected);
+          const scenario = scenarioFor(room.roomNumber);
+          const forcedEmpty =
+            scenario && scenario.effect === 'empty-room-appliances' && period >= 2 && period <= 6;
 
-        const rng = seededRandom(`${room.roomNumber}-${dateStr}-${period}`);
-        let draw = computeRoomDraw({ ...room, lightStatus: lights, fanStatus: fans }, forcedEmpty ? 0 : present);
-        let anomalous = false;
-        if (scenario && scenario.effect === 'high-consumption') { draw *= scenario.multiplier; anomalous = true; }
-        if (scenario && scenario.effect === 'low-occupancy-high-energy') { draw *= scenario.multiplier; anomalous = true; }
-        draw *= 0.93 + rng() * 0.14; // ±7% meter noise
+          let lights = present > 0 ? 'on' : 'off';
+          let fans = present > 0 ? 'on' : 'off';
+          if (forcedEmpty) {
+            lights = 'on';
+            fans = 'off';
+          }
 
-        const prevRate = lastRate.get(room._id.toString()) || 0;
-        lastRate.set(room._id.toString(), Number(draw.toFixed(3)));
+          const rng = seededRandom(`${room.roomNumber}-${dateStr}-${slotKey}`);
+          let draw = computeRoomDraw({ ...room, lightStatus: lights, fanStatus: fans }, forcedEmpty ? 0 : present);
+          let anomalous = false;
+          // Demo anomalies whenever the room is actually occupied — day OR
+          // evening/night batches — matching the live simulator.
+          if (present > 0 && period >= 1 && scenario && scenario.effect === 'high-consumption') { draw *= scenario.multiplier; anomalous = true; }
+          if (present > 0 && period >= 1 && scenario && scenario.effect === 'low-occupancy-high-energy') { draw *= scenario.multiplier; anomalous = true; }
+          draw *= 0.93 + rng() * 0.14; // ±7% meter noise
 
-        const energyConsumption = draw * INTERVAL_HOURS;
-        const lightsOn = lights === 'on' ? room.numLights : 0;
-        const fansOn = fans === 'on' ? room.numFans : 0;
+          const prevRate = lastRate.get(room._id.toString()) || 0;
+          lastRate.set(room._id.toString(), Number(draw.toFixed(3)));
 
-        tickReadings.push({
-          roomId: room._id,
-          buildingId: buildingById.get(room.buildingId.toString()) || room.buildingId,
-          timestamp,
-          energyConsumption: Number(energyConsumption.toFixed(4)),
-          power: Number(draw.toFixed(3)),
-          hourlyRate: Number(draw.toFixed(3)),
-          voltage: 230,
-          current: Number(((draw * 1000) / 230).toFixed(2)),
-          intervalMinutes: MINUTES_PER_TICK,
-          occupancy: present,
-          lightsOn,
-          fansOn,
-          applianceEnergy: Number((lightsOn * 0.014 + fansOn * 0.02) * INTERVAL_HOURS),
-          potentialApplianceEnergy: Number((room.numLights * 0.014 + room.numFans * 0.02) * INTERVAL_HOURS),
-          anomalous
-        });
-        occupancy.push({
-          roomId: room._id,
-          timestamp,
-          expectedOccupancy: expected,
-          actualOccupancy: forcedEmpty ? 0 : present,
-          attendanceProbability: expected > 0 ? 0.85 : 0,
-          source: 'dummy_attendance'
-        });
+          const energyConsumption = draw * INTERVAL_HOURS;
+          const lightsOn = lights === 'on' ? room.numLights : 0;
+          const fansOn = fans === 'on' ? room.numFans : 0;
 
-        if (wantedPrediction) {
-          contexts.push({
-            room: {
-              ...room,
-              buildingCode: codeMap.get(room.buildingId.toString()) || '',
-              currentOccupancy: forcedEmpty ? 0 : present,
-              lightStatus: lights,
-              fanStatus: fans
-            },
-            hour,
-            period,
-            dayOfWeek: academicDay,
-            historicalEnergy: prevRate,
-            actualRate: draw,
-            simTime: timestamp
+          tickReadings.push({
+            roomId: room._id,
+            buildingId: buildingById.get(room.buildingId.toString()) || room.buildingId,
+            timestamp,
+            energyConsumption: Number(energyConsumption.toFixed(4)),
+            power: Number(draw.toFixed(3)),
+            hourlyRate: Number(draw.toFixed(3)),
+            voltage: 230,
+            current: Number(((draw * 1000) / 230).toFixed(2)),
+            intervalMinutes: MINUTES_PER_TICK,
+            occupancy: present,
+            lightsOn,
+            fansOn,
+            applianceEnergy: Number((lightsOn * 0.014 + fansOn * 0.02) * INTERVAL_HOURS),
+            potentialApplianceEnergy: Number((room.numLights * 0.014 + room.numFans * 0.02) * INTERVAL_HOURS),
+            anomalous
           });
+          occupancy.push({
+            roomId: room._id,
+            timestamp,
+            expectedOccupancy: expected,
+            actualOccupancy: forcedEmpty ? 0 : present,
+            attendanceProbability: expected > 0 ? 0.85 : 0,
+            source: 'dummy_attendance'
+          });
+
+          if (wantTickPrediction) {
+            contexts.push({
+              room: {
+                ...room,
+                buildingCode: codeMap.get(room.buildingId.toString()) || '',
+                currentOccupancy: forcedEmpty ? 0 : present,
+                lightStatus: lights,
+                fanStatus: fans
+              },
+              hour,
+              period,
+              dayOfWeek: academicDay,
+              historicalEnergy: prevRate,
+              actualRate: draw,
+              simTime: timestamp
+            });
+          }
         }
-      }
 
-      readings.push(...tickReadings);
+        readings.push(...tickReadings);
 
-      if (wantedPrediction && contexts.length) {
-        try {
-          const outputs = await predictionService.generatePredictionBatch(contexts, settings);
-          await Classroom.bulkWrite(
-            outputs.map((o) => ({
-              updateOne: {
-                filter: { _id: o.roomId },
-                update: {
-                  $set: {
-                    predictedEnergy: o.predictedEnergy,
-                    energyDifference: o.difference,
-                    percentageDifference: o.percentageDifference,
-                    status: o.status
+        if (wantTickPrediction && contexts.length) {
+          try {
+            const outputs = await predictionService.generatePredictionBatch(contexts, settings, { docSink: predictionDocs });
+            await Classroom.bulkWrite(
+              outputs.map((o) => ({
+                updateOne: {
+                  filter: { _id: o.roomId },
+                  update: {
+                    $set: {
+                      predictedEnergy: o.predictedEnergy,
+                      energyDifference: o.difference,
+                      percentageDifference: o.percentageDifference,
+                      status: o.status
+                    }
                   }
                 }
-              }
-            }))
-          );
-          predictionTicks += 1;
-        } catch (e) {
-          console.warn('[bulk-history] prediction pass skipped:', e.message);
+              }))
+            );
+            predictionTicks += 1;
+          } catch (e) {
+            console.warn('[bulk-history] prediction pass skipped:', e.message);
+          }
         }
       }
     }
@@ -220,8 +233,9 @@ export async function generateBulkHistory({ days = 40, predictionDays = 3 } = {}
 
   await EnergyReading.insertMany(readings, { ordered: false });
   await OccupancyReading.insertMany(occupancy, { ordered: false });
+  if (predictionDocs.length) await Prediction.insertMany(predictionDocs, { ordered: false });
 
-  // Final classroom "now" state = last period of the most recent history day.
+  // Final classroom "now" state = last 30-min slot of the most recent history day.
   const lastReading = (roomId) => readings
     .slice()
     .reverse()
@@ -236,8 +250,6 @@ export async function generateBulkHistory({ days = 40, predictionDays = 3 } = {}
         .find((o) => String(o.roomId) === String(room._id));
       const expected = occ ? occ.expectedOccupancy : 0;
       const present = occ ? occ.actualOccupancy : 0;
-      const scenario = scenarioFor(room.roomNumber);
-      const forcedEmpty = scenario && scenario.effect === 'empty-room-appliances';
       return {
         updateOne: {
           filter: { _id: room._id },
@@ -246,8 +258,8 @@ export async function generateBulkHistory({ days = 40, predictionDays = 3 } = {}
               currentOccupancy: present,
               expectedOccupancy: expected,
               presenceDetected: present > 0,
-              lightStatus: forcedEmpty ? 'on' : present > 0 ? 'on' : 'off',
-              fanStatus: present > 0 ? 'on' : 'off',
+              lightStatus: r && r.lightsOn > 0 ? 'on' : 'off',
+              fanStatus: r && r.fansOn > 0 ? 'on' : 'off',
               currentEnergy: r ? r.hourlyRate : 0
             }
           }

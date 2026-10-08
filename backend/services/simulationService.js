@@ -33,12 +33,8 @@ const state = {
 function normalizeSimClock() {
   const now = new Date();
   const normalized = new Date(now);
-  const h = normalized.getHours();
-  if (h < 9) normalized.setHours(9, 30, 0, 0);
-  if (h >= 17) {
-    normalized.setDate(normalized.getDate());
-    normalized.setHours(9, 30, 0, 0);
-  }
+  // College runs 24/7 — simulate continuously across all hours and days
+  normalized.setMinutes(normalized.getMinutes() < 30 ? 0 : 30, 0, 0);
   return normalized;
 }
 
@@ -99,8 +95,8 @@ async function buildingCodeMap() {
 /** Reproduce the same expected-occupancy derivation the ML pipeline uses. */
 function expectedFor(room, period, academicDay) {
   const isStaff = room.type === 'staff_room';
-  if (isStaff) return 6 + (academicDay % 3);
   if (!isRoomScheduled(room.roomNumber, academicDay, period)) return 0;
+  if (isStaff) return 6 + (academicDay % 3);
   return Math.max(4, Math.round(room.capacity * (getExpectedOccupancyByRate(room.roomNumber) || 0.7)));
 }
 
@@ -108,7 +104,7 @@ function advanceClock(minutes) {
   const next = new Date(state.simClock.getTime() + minutes * 60 * 1000);
   state.simClock = next;
   if (next.getHours() === 0 && next.getMinutes() < minutes) {
-    state.simDay = (state.simDay + 1) % 5;
+    state.simDay = (state.simDay + 1) % 7; // full 7-day cycle (24/7 campus)
   }
   return next;
 }
@@ -183,11 +179,13 @@ async function recordEnergyReadings(updates, buildingCodes, simTime, intervalHou
 
     const scenario = u.scenario;
     let anomalous = false;
-    if (scenario && scenario.effect === 'high-consumption') {
+    // Inject demo anomalies whenever the room actually has people in it — day
+    // OR evening/night batches — so nights aren't artificially clean either.
+    if (present > 0 && scenario && scenario.effect === 'high-consumption') {
       draw *= scenario.multiplier;
       anomalous = true;
     }
-    if (scenario && scenario.effect === 'low-occupancy-high-energy') {
+    if (present > 0 && scenario && scenario.effect === 'low-occupancy-high-energy') {
       draw *= scenario.multiplier;
       anomalous = true;
     }
@@ -223,74 +221,82 @@ async function recordEnergyReadings(updates, buildingCodes, simTime, intervalHou
   return readings;
 }
 
-async function updateClassroomFields(updates, readings) {
-  for (let i = 0; i < updates.length; i++) {
-    const { room, present, expectedOccupancy, presenceDetected, lights, fans } = updates[i];
-    const reading = readings[i];
-    await Classroom.updateOne(
-      { _id: room._id },
-      {
-        $set: {
-          currentOccupancy: present,
-          expectedOccupancy,
-          presenceDetected,
-          lightStatus: lights,
-          fanStatus: fans,
-          currentEnergy: reading.hourlyRate
-        }
-      }
-    );
-  }
-}
-
-async function runPredictionPass(rooms, buildingCodes, simTime) {
-  const hour = state.simClock.getHours();
+/**
+ * Run one prediction pass for the current tick and return a Map(roomId -> output).
+ * Prediction docs are persisted by generatePredictionBatch; nothing else is
+ * written here so the caller can persist the classroom state atomically.
+ *
+ * The "actual" used for the deviation is THIS tick's freshly-generated reading
+ * (readings[i] aligns with rooms[i]/updates[i]), NOT a `findOne().sort(-1)`
+ * query: after a server restart the sim clock resets, so the globally-latest
+ * reading can belong to an older, future-dated run and would corrupt the pct.
+ */
+async function runPredictionPass(rooms, updates, readings, buildingCodes, simTime) {
+  const hour = simTime.getHours();
   try {
     const contexts = [];
-    for (const room of rooms) {
+    for (let i = 0; i < rooms.length; i++) {
+      const room = rooms[i];
+      const u = updates[i];
       const hist = await predictionService.historicalEnergyRate(room._id, 3);
-      const last = await EnergyReading.findOne({ roomId: room._id }).sort({ timestamp: -1 }).lean();
       contexts.push({
         room: {
           ...room,
-          buildingCode: buildingCodes[room.buildingId.toString()] || ''
+          buildingCode: buildingCodes[room.buildingId.toString()] || '',
+          currentOccupancy: u.present,
+          lightStatus: u.lights,
+          fanStatus: u.fans
         },
         hour,
-        period: Math.max(1, Math.min(8, hour - 8)),
-        dayOfWeek: state.simDay + 1,
+        period: periodForHour(hour),
+        dayOfWeek: (simTime.getDay() + 6) % 7 + 1,
         historicalEnergy: hist,
-        actualRate: last ? last.hourlyRate : 0,
+        actualRate: readings[i] ? readings[i].hourlyRate : 0,
         simTime
       });
     }
     const outputs = await predictionService.generatePredictionBatch(contexts, await getSettings());
-
-    const map = new Map(outputs.map((o) => [o.roomId.toString(), o]));
-    await Classroom.bulkWrite(
-      rooms.map((room) => {
-        const o = map.get(room._id.toString());
-        return {
-          updateOne: {
-            filter: { _id: room._id },
-            update: {
-              $set: {
-                predictedEnergy: o?.predictedEnergy ?? 0,
-                energyDifference: o?.difference ?? 0,
-                percentageDifference: o?.percentageDifference ?? 0,
-                status: o?.status ?? 'normal'
-              }
-            }
-          }
-        };
-      })
-    );
     state.energyError = null;
-    return map;
+    return new Map(outputs.map((o) => [o.roomId.toString(), o]));
   } catch (e) {
     state.energyError = e.message;
     console.error('[sim] prediction pass failed:', e.message);
     return null;
   }
+}
+
+/**
+ * Persist every classroom field for the current tick in ONE bulkWrite so the
+ * document is never observed in a torn state (old predictedEnergy + new
+ * currentEnergy, etc.). All fields come from the same tick's outputs.
+ */
+async function updateClassroomsAtomic(updates, readings, predictionMap) {
+  await Classroom.bulkWrite(
+    updates.map((u, i) => {
+      const { room, present, expectedOccupancy, presenceDetected, lights, fans } = u;
+      const reading = readings[i];
+      const o = predictionMap ? predictionMap.get(room._id.toString()) : null;
+      return {
+        updateOne: {
+          filter: { _id: room._id },
+          update: {
+            $set: {
+              currentOccupancy: present,
+              expectedOccupancy,
+              presenceDetected,
+              lightStatus: lights,
+              fanStatus: fans,
+              currentEnergy: reading ? reading.hourlyRate : 0,
+              predictedEnergy: o?.predictedEnergy ?? 0,
+              energyDifference: o?.difference ?? 0,
+              percentageDifference: o?.percentageDifference ?? 0,
+              status: o?.status ?? 'normal'
+            }
+          }
+        }
+      };
+    })
+  );
 }
 
 async function runAlertAndRecommendationPass(rooms, settings) {
@@ -313,21 +319,18 @@ export async function runTick() {
     const settings = await getSettings();
     const simTime = advanceClock(state.simMinutesPerTick);
     const period = periodForHour(simTime.getHours());
-    const academicDay = state.simDay + 1;
+    // Real 7-day campus calendar (Mon=1..Sun=7) from the simulated clock — 24/7.
+    const academicDay = (simTime.getDay() + 6) % 7 + 1;
     const buildingCodes = await buildingCodeMap();
-    let rooms = await Classroom.find({}).lean();
-
-    // Evening/night: simulate idle campus.
-    if (!period) {
-      rooms = rooms.map((r) => ({ ...r, currentOccupancy: 0, lightStatus: 'off', fanStatus: 'off', presenceDetected: false }));
-    }
+    const rooms = await Classroom.find({}).lean();
 
     const updates = await updateOccupancyAndAppliances(rooms, period, academicDay, buildingCodes);
     const readings = await recordEnergyReadings(updates, buildingCodes, simTime, state.simMinutesPerTick / 60);
-    await updateClassroomFields(updates, readings);
 
-    const result = await runPredictionPass(await Classroom.find({}).lean(), buildingCodes, simTime);
-    if (result) {
+    const predictionMap = await runPredictionPass(rooms, updates, readings, buildingCodes, simTime);
+    await updateClassroomsAtomic(updates, readings, predictionMap);
+
+    if (predictionMap) {
       await runAlertAndRecommendationPass(rooms, settings);
     }
 

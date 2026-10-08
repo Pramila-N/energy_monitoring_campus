@@ -157,7 +157,7 @@ async function main() {
   const ready = mlService.isEnergyModelReady();
   console.log(`Energy model ready: ${ready ? 'YES' : 'NO (no prediction history will be generated; run "python ml/scripts/train_model.py" first)'}`);
 
-  console.log(`Generating ${SEED_HISTORY_DAYS} weekdays of meter/sensor history (real ML predictions for last ${SEED_PREDICTION_DAYS} days)...`);
+  console.log(`Generating ${SEED_HISTORY_DAYS} days of 24/7 meter/sensor history (real ML predictions for last ${SEED_PREDICTION_DAYS} days)...`);
   const historyStats = await generateBulkHistory({
     days: SEED_HISTORY_DAYS,
     predictionDays: SEED_PREDICTION_DAYS

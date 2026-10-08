@@ -117,7 +117,8 @@ export default function Alerts() {
         <Filter size={14} className="text-slate-400" />
         <select value={severity} onChange={(e) => setSeverity(e.target.value)} className="input w-40">
           <option value="">All severities</option>
-          <option value="low">Low</option>
+          <option value="warning">Warning</option>
+          <option value="abnormal">Abnormal</option>
           <option value="medium">Medium</option>
           <option value="high">High</option>
           <option value="critical">Critical</option>

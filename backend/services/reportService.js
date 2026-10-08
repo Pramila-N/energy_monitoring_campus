@@ -13,19 +13,31 @@ function localTimezoneString() {
 const LOCAL_TZ = localTimezoneString();
 
 function startOfRange(type, from) {
+  const base = from instanceof Date && !isNaN(from) ? from : new Date();
   const d = type === 'week'
-    ? new Date(from.getTime() - 6 * 86400000)
+    ? new Date(base.getTime() - 6 * 86400000)
     : type === 'month'
       ? new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1)
-      : new Date(from);
+      : new Date(base);
   d.setHours(0, 0, 0, 0);
   return d;
 }
 
+function endOfDay(d) {
+  const x = new Date(d);
+  x.setHours(23, 59, 59, 999);
+  return x;
+}
+
 export async function buildReport({ type = 'day', from, to } = {}) {
   const now = new Date();
-  const fromDate = startOfRange(type, from ? new Date(from) : now);
-  const toDate = to ? new Date(to) : new Date(now.getTime() + 86400000);
+  const isRange = type === 'custom';
+  const fromDate = isRange
+    ? startOfRange('day', from ? new Date(from) : new Date(now.getTime() - 6 * 86400000))
+    : startOfRange(type, from);
+  const toDate = isRange
+    ? endOfDay(to ? new Date(to) : now)
+    : new Date(now.getTime() + 86400000);
 
   const match = { timestamp: { $gte: fromDate, $lte: toDate } };
   const periodId = type === 'day'
@@ -57,7 +69,7 @@ export async function buildReport({ type = 'day', from, to } = {}) {
     ]),
     Building.find({}).lean(),
     Classroom.find({}).populate('buildingId', 'name code').lean(),
-    Prediction.find({ status: 'abnormal', createdAt: { $gte: fromDate } }).countDocuments(),
+    Prediction.find({ status: { $in: ['abnormal', 'high', 'critical'] }, timestamp: { $gte: fromDate, $lte: toDate } }).countDocuments(),
     Alert.find({ resolvedAt: { $gte: fromDate, $lte: toDate } }).countDocuments()
   ]);
 

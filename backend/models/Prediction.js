@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-export const PREDICTION_STATUS = ['normal', 'warning', 'abnormal'];
+export const PREDICTION_STATUS = ['normal', 'warning', 'abnormal', 'high', 'critical'];
 
 const predictionSchema = new mongoose.Schema(
   {

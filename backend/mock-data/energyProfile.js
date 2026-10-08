@@ -11,7 +11,12 @@ export const ROOM_TYPE_LABELS = {
   chemistry_lab: 'Chemistry Lab',
   electronics_lab: 'Electronics Lab',
   seminar_hall: 'Seminar Hall',
-  staff_room: 'Staff Room'
+  staff_room: 'Staff Room',
+  library: 'Library',
+  placement_cell: 'Placement Cell',
+  conference_hall: 'Conference Hall',
+  academic_lab: 'Academic Lab',
+  special_lab: 'Special Lab'
 };
 
 export const ENERGY_PROFILES = {
@@ -21,7 +26,12 @@ export const ENERGY_PROFILES = {
   physics_lab:    { equipmentDraw: 1.0, occupancyScale: 1.2, idleMultiplier: 0.4 },
   chemistry_lab:  { equipmentDraw: 1.1, occupancyScale: 1.2, idleMultiplier: 0.45 },
   electronics_lab:{ equipmentDraw: 1.0, occupancyScale: 1.2, idleMultiplier: 0.4 },
-  staff_room:     { equipmentDraw: 0.4, occupancyScale: 0.8, idleMultiplier: 0.5 }
+  staff_room:     { equipmentDraw: 0.4, occupancyScale: 0.8, idleMultiplier: 0.5 },
+  library:        { equipmentDraw: 0.35, occupancyScale: 1.1, idleMultiplier: 0.3 },
+  placement_cell: { equipmentDraw: 0.3, occupancyScale: 0.9, idleMultiplier: 0.4 },
+  conference_hall:{ equipmentDraw: 0.7, occupancyScale: 1.7, idleMultiplier: 0.25 },
+  academic_lab:   { equipmentDraw: 0.9, occupancyScale: 1.3, idleMultiplier: 0.4 },
+  special_lab:    { equipmentDraw: 1.3, occupancyScale: 1.4, idleMultiplier: 0.5 }
 };
 
 /** Per-appliance draw in kW (used for savings + mock meter). */

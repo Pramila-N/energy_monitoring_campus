@@ -47,8 +47,12 @@ export async function historicalEnergyRate(roomId, hours = 3) {
  * Generate and persist energy predictions for a batch of rooms.
  * `rooms` = array of { room, hour, period, dayOfWeek, historicalEnergy, actualRate, simTime }
  * Returns per-room results aligned by original order.
+ *
+ * options.docSink: when provided, Prediction docs are pushed into this array
+ * instead of being written immediately (bulk seeding accumulates them and does
+ * ONE insertMany — avoids thousands of sequential Atlas roundtrips).
  */
-export async function generatePredictionBatch(roomContexts, settings) {
+export async function generatePredictionBatch(roomContexts, settings, options = {}) {
   if (!mlService.isEnergyModelReady()) {
     throw new ApiError(
       503,
@@ -56,11 +60,13 @@ export async function generatePredictionBatch(roomContexts, settings) {
     );
   }
 
+  const { docSink = null } = options;
   const requests = roomContexts.map((r) => ({ record: buildEnergyFeatures(r), ctx: r }));
   const result = await mlService.predictEnergyBatch(requests.map((x) => x.record));
   const predictions = result.predictions ?? result;
 
   const outputs = [];
+  const docs = [];
   for (let i = 0; i < requests.length; i++) {
     const { record, ctx } = requests[i];
     const pred = predictions[i] || {};
@@ -69,7 +75,7 @@ export async function generatePredictionBatch(roomContexts, settings) {
     const diff = actual - predicted;
     const pct = predicted > 0 ? (diff / predicted) * 100 : 0;
 
-    await Prediction.create({
+    docs.push({
       roomId: ctx.room._id,
       timestamp: ctx.simTime || new Date(),
       period: record.period,
@@ -103,6 +109,9 @@ export async function generatePredictionBatch(roomContexts, settings) {
       confidence: Number(pred.confidence || 0)
     });
   }
+
+  if (docSink) docSink.push(...docs);
+  else if (docs.length) await Prediction.insertMany(docs, { ordered: false });
   return outputs;
 }
 

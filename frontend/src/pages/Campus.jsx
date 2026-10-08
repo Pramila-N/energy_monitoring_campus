@@ -6,7 +6,7 @@ import api from '../api/client.js';
 import { PageHeader } from '../components/PageHeader.jsx';
 import { PageLoader, ErrorState, EmptyState } from '../components/Feedback.jsx';
 import { StatusBadge, OnOffBadge, RoomTypeTag } from '../components/Badges.jsx';
-import { formatKwh, formatNumber } from '../utils/format.js';
+import { formatKwh, formatNumber, isAbnormalStatus, statusGroup } from '../utils/format.js';
 
 export default function Campus() {
   const buildingsApi = usePolling(() => api.get('/buildings').then((r) => r.data), 60000);
@@ -20,7 +20,7 @@ export default function Campus() {
   const rooms = useMemo(() => {
     let list = allRooms;
     if (q.trim()) list = list.filter((r) => r.roomNumber.toLowerCase().includes(q.trim().toLowerCase()));
-    if (status) list = list.filter((r) => r.status === status);
+    if (status) list = list.filter((r) => statusGroup(r.status) === status);
     return list;
   }, [allRooms, q, status]);
 
@@ -30,7 +30,7 @@ export default function Campus() {
   const counts = {
     normal: allRooms.filter((r) => r.status === 'normal').length,
     warning: allRooms.filter((r) => r.status === 'warning').length,
-    abnormal: allRooms.filter((r) => r.status === 'abnormal').length
+    abnormal: allRooms.filter((r) => isAbnormalStatus(r.status)).length
   };
   const maxEnergy = Math.max(...buildings.map((b) => b.energyToday), 1);
 
@@ -150,7 +150,7 @@ export default function Campus() {
                       <Link to={`/classrooms/${r._id}`} className="font-bold text-brand-600 hover:underline">{r.roomNumber}</Link>
                       <p className="text-xs text-slate-400">{r.buildingId?.name || ''} · Floor {r.floor}</p>
                     </td>
-                    <td className="td"><RoomTypeTag type={r.type} /><p className="mt-0.5 truncate text-xs text-slate-400">{r.facultyId?.name || 'Unassigned'}</p></td>
+                    <td className="td"><RoomTypeTag type={r.type} /><p className="mt-0.5 truncate text-xs text-slate-400">{r.facultyId?.name || r.assignedFaculty || 'Unassigned'}</p></td>
                     <td className="td">
                       <span className="font-semibold">{r.currentOccupancy}/{r.capacity}</span>
                       {r.expectedOccupancy > 0 && <span className="ml-1 text-xs text-slate-400">exp {r.expectedOccupancy}</span>}

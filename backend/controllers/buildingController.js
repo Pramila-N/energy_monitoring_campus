@@ -17,7 +17,7 @@ export const listBuildings = asyncHandler(async (req, res) => {
         ...b,
         totalRooms: rooms.length,
         occupiedRooms: rooms.filter((r) => r.currentOccupancy > 0).length,
-        abnormalRooms: rooms.filter((r) => r.status === 'abnormal').length,
+        abnormalRooms: rooms.filter((r) => ['abnormal', 'high', 'critical'].includes(r.status)).length,
         energyToday: Number((energy[0]?.total || 0).toFixed(2)),
         readings: energy[0]?.count || 0
       };
