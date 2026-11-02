@@ -12,14 +12,14 @@ export function StatCard({ label, value, sub, icon: Icon, accent = 'brand', load
       <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-white ${accents[accent]}`}>
         {Icon && <Icon size={20} />}
       </div>
-      <div className="min-w-0">
-        <p className="truncate text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
         {loading ? (
           <div className="mt-1.5 h-6 w-20 animate-pulse rounded bg-slate-200" />
         ) : (
-          <p className="truncate text-xl font-bold text-slate-800">{value}</p>
+          <p className="text-xl font-bold leading-tight text-slate-800">{value}</p>
         )}
-        {sub && !loading && <p className="truncate text-xs text-slate-500">{sub}</p>}
+        {sub && !loading && <p className="text-xs leading-tight text-slate-500">{sub}</p>}
       </div>
     </div>
   );

@@ -61,7 +61,7 @@ export default function Dashboard() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
         <StatCard label="Energy today" value={formatKwh(s.totalEnergyToday, 1)} sub={`${formatNumber(s.readingsToday)} readings`} icon={Zap} accent="brand" loading={loading} />
         <StatCard label="Energy saved" value={formatKwh(s.energySavedToday, 1)} sub="vs appliance baseline" icon={Leaf} accent="ok" loading={loading} />
         <StatCard label="Active rooms" value={`${s.activeRooms}/${s.totalRooms}`} sub="occupancy detected" icon={DoorOpen} accent="info" loading={loading} />

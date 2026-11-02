@@ -22,9 +22,17 @@ function PriorityBadge({ p }) {
   return <span className={`badge ${cls}`}>{p}</span>;
 }
 
+function isCurrentActiveAlert(alert) {
+  if (alert.status !== 'active') return false;
+  const createdAt = new Date(alert.createdAt);
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  return createdAt >= startOfToday;
+}
+
 export default function Alerts() {
   const toast = useToast();
-  const [tab, setTab] = useState('');
+  const [tab, setTab] = useState('active');
   const [severity, setSeverity] = useState('');
   const [resolveTarget, setResolveTarget] = useState(null);
   const [note, setNote] = useState('');
@@ -35,7 +43,8 @@ export default function Alerts() {
 
   const alerts = useMemo(() => {
     let list = data?.alerts || [];
-    if (tab) list = list.filter((a) => a.status === tab);
+    if (tab === 'active') list = list.filter(isCurrentActiveAlert);
+    else if (tab) list = list.filter((a) => a.status === tab);
     if (severity) list = list.filter((a) => a.severity === severity);
     return list;
   }, [data, tab, severity]);
@@ -63,7 +72,7 @@ export default function Alerts() {
 
   const all = data?.alerts || [];
   const counts = {
-    active: all.filter((a) => a.status === 'active').length,
+    active: all.filter(isCurrentActiveAlert).length,
     contacted: all.filter((a) => a.status === 'contacted').length,
     resolved: all.filter((a) => a.status === 'resolved').length
   };
@@ -75,6 +84,7 @@ export default function Alerts() {
       toast.success('Alert resolved.');
       setResolveTarget(null);
       setNote('');
+      setTab('resolved');
       refetch();
     } catch (e) {
       toast.error(e?.response?.data?.message || 'Failed to resolve');
@@ -158,6 +168,16 @@ export default function Alerts() {
                         classroomId={a.roomId?._id || a.roomId}
                         roomNumber={a.roomId?.roomNumber}
                         facultyName={a.facultyName}
+                        onCallInitiated={async () => {
+                          try {
+                            await api.post(`/alerts/${a._id}/contact`);
+                            toast.success('Alert marked as contacted.');
+                            setTab('contacted');
+                            refetch();
+                          } catch (e) {
+                            toast.error(e?.response?.data?.message || 'Call started, but the alert status could not be updated.');
+                          }
+                        }}
                       />
                       <button className="btn-success py-1.5 text-xs" onClick={() => setResolveTarget(a)}>
                         <CheckCircle2 size={12} /> Resolve

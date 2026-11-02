@@ -30,7 +30,7 @@ function StatusChip({ status, duration, reason }) {
  *  until the provider reports a terminal status. Uses the backend (Exotel in
  *  production, simulated lifecycle in demo mode). Never displays the number.
  */
-export default function CallFaculty({ classroomId, roomNumber, facultyName, disabled = false, compact = false }) {
+export default function CallFaculty({ classroomId, roomNumber, facultyName, disabled = false, compact = false, onCallInitiated }) {
   const toast = useToast();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -104,6 +104,7 @@ export default function CallFaculty({ classroomId, roomNumber, facultyName, disa
     setConfirmOpen(false);
     try {
       const { data } = await api.post('/calls/faculty', { classroomId });
+      if (onCallInitiated) await onCallInitiated();
       setPhase('active');
       setCall({ status: data.status || 'initiated', startedAt: null, endedAt: null, duration: 0, failureReason: '' });
       toast.success(`Call initiated — calling ${data.facultyName}…`);

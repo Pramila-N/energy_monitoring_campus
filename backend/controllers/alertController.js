@@ -5,6 +5,11 @@ import recommendationService from '../services/recommendationService.js';
 export const getAlerts = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.status) filter.status = req.query.status;
+  if (req.query.status === 'active') {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    filter.createdAt = { $gte: startOfToday };
+  }
   if (req.query.severity) filter.severity = req.query.severity;
   if (req.query.type) filter.type = req.query.type;
   if (req.query.roomId) filter.roomId = req.query.roomId;

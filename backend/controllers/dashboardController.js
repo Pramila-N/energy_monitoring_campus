@@ -17,7 +17,7 @@ export const getSummary = asyncHandler(async (req, res) => {
   const [totalToday, savedToday, alerts, rooms, buildings, ml] = await Promise.all([
     energyService.totalEnergySince(TODAY()),
     energyService.energySavedSince(TODAY()),
-    Alert.find({ status: { $in: ['active', 'contacted'] } }).sort({ createdAt: -1 }).limit(8).lean(),
+    Alert.find({ status: 'active', createdAt: { $gte: TODAY() } }).sort({ createdAt: -1 }).limit(8).lean(),
     Classroom.find({}).populate('buildingId', 'name code').populate('facultyId', 'name phoneNumber').lean(),
     Building.find({}).lean(),
     mlService.modelStatus()
